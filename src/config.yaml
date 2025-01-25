@@ -2,5 +2,6 @@
 ###############
 # INPUT FILE 
 ###############
-libro_spese_path: "/Users/gretagalliani/Library/Mobile Documents/com~apple~Numbers/Documents/Contabilità/Libro spese.numbers"
-finance_raw_path: "input/finance_raw.csv"
+libro_spese_path: "/Users/gretagalliani/Library/Mobile Documents/com~apple~Numbers/Documents/Contabilità/Libro spese.numbers"
+finance_raw_spese_path: "input/finance_raw_spese.csv"
+finance_raw_entrate_path: "input/finance_raw_entrate.csv"
