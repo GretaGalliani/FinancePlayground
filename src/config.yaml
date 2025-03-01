@@ -1,7 +1,96 @@
+###############
+# INPUT FILES 
+###############
+numbers_file_path: "/Users/gretagalliani/Library/Mobile Documents/com~apple~Numbers/Documents/Contabilità/Libro spese.numbers"
+
+# Raw data paths
+raw_expenses_path: "input/finance_raw_expenses.csv"
+raw_income_path: "input/finance_raw_income.csv"
+raw_savings_path: "input/finance_raw_savings.csv"
+
+# Processed data paths
+processed_expenses_path: "input/finance_processed_expenses.csv"
+processed_income_path: "input/finance_processed_income.csv"
+processed_savings_path: "input/finance_processed_savings.csv"
+monthly_savings_path: "input/finance_monthly_savings.csv"
 
 ###############
-# INPUT FILE 
+# COLUMN MAPPINGS
 ###############
-libro_spese_path: "/Users/gretagalliani/Library/Mobile Documents/com~apple~Numbers/Documents/Contabilità/Libro spese.numbers"
-finance_raw_spese_path: "input/finance_raw_spese.csv"
-finance_raw_entrate_path: "input/finance_raw_entrate.csv"
+
+# Expense sheet column mapping
+expenses_column_mapping:
+  "Data": "Date"
+  "Descrizione": "Description"
+  "Categoria": "Category"
+  "Importo": "Value"
+
+# Income sheet column mapping
+income_column_mapping:
+  "Data": "Date"
+  "Descrizione": "Description"
+  "Categoria": "Category"
+  "Importo": "Value"
+
+# Savings sheet column mapping (new format)
+savings_column_mapping:
+  "Data": "Date"
+  "Descrizione": "Description"
+  "Categoria": "Category" 
+  "Account": "Account"
+  "Importo": "Value"
+  "Tipo": "Type"
+
+###############
+# SHEET NAMES
+###############
+sheet_mappings:
+  "uscite": "expenses"
+  "entrate": "income"
+  "risparmi": "savings"
+
+###############
+# SAVINGS TYPES
+###############
+savings_types:
+  "Trasferimento": "Transfer"
+  "Accantonamento": "Allocation"
+  "Pagamento": "Payment"
+  "Prelievo": "Withdrawal"
+
+###############
+# CATEGORIES
+###############
+# Valid categories for expenses
+valid_expense_categories:
+  - "Altro"
+  - "Benessere Personale"
+  - "Cibo"
+  - "Formazione"
+  - "Imposte"
+  - "Oggetti personali"
+  - "Servizi"
+  - "Spese mediche"
+  - "Svago"
+  - "Veicoli"
+  - "Viaggi"
+
+# Valid categories for income
+valid_income_categories:
+  - "Altro"
+  - "Bonus"
+  - "Extra"
+  - "Finanza"
+  - "Rimborso tasse"
+  - "Stipendio"
+  - "Welfare" 
+
+# Valid categories for savings
+valid_savings_categories:
+  - "Accantomenti generali"
+  - "Risparmi generali"
+  - "Fondo vacanze"
+  - "Psicologa"
+
+# Default category to use for unmapped or null categories
+default_category: "Varie"  # Miscellaneous
