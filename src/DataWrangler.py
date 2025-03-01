@@ -109,6 +109,21 @@ class DataWrangler:
                     # Process the data and create DataFrame
                     df = self._process_sheet_data(data, sheet.name)
 
+                    # Special handling: if this is income data, filter out the Welfare category
+                    if english_name == "income":
+                        # Filter out Welfare category if it exists
+                        categories_column = self._get_category_column_name(df)
+                        if categories_column and categories_column in df.columns:
+                            excluded_categories = self.config.get(
+                                "excluded_income_categories", ["Welfare"]
+                            )
+                            df = df.filter(
+                                ~pl.col(categories_column).is_in(excluded_categories)
+                            )
+                            print(
+                                f"Filtered out excluded income categories: {excluded_categories}"
+                            )
+
                     # Store DataFrame with standardized name
                     dfs[english_name] = df
 
@@ -132,6 +147,32 @@ class DataWrangler:
             except Exception as e:
                 print(f"Error processing Numbers file: {str(e)}")
                 raise
+
+    def _get_category_column_name(self, df: pl.DataFrame) -> Optional[str]:
+        """
+        Get the name of the category column in a DataFrame.
+
+        Args:
+            df: DataFrame to search
+
+        Returns:
+            Optional[str]: Name of the category column if found, None otherwise
+        """
+        # First check for the standard English name
+        if "Category" in df.columns:
+            return "Category"
+
+        # Then check for the Italian name
+        if "Categoria" in df.columns:
+            return "Categoria"
+
+        # Try to infer from column mapping
+        income_mapping = self.config.get("income_column_mapping", {})
+        for italian_name, english_name in income_mapping.items():
+            if english_name == "Category" and italian_name in df.columns:
+                return italian_name
+
+        return None
 
     def _process_sheet_data(
         self, data: List[List[Any]], sheet_name: str
@@ -253,6 +294,7 @@ class DataWrangler:
                 .str.replace(r"[^\d,\.\-]", "")  # Remove currency symbols and spaces
                 .str.replace(",", ".")  # Replace comma with dot for decimal
                 .cast(pl.Float64)
+                .round(2)  # Round to exactly two decimal places
             )
 
         # Replace empty strings with None
@@ -292,7 +334,16 @@ class DataWrangler:
             if directory:
                 os.makedirs(directory, exist_ok=True)
 
+            # Round all float columns to 2 decimal places before saving
+            df_to_save = df.clone()
+            for col in df.columns:
+                if df[col].dtype in (pl.Float32, pl.Float64):
+                    df_to_save = df_to_save.with_columns(
+                        pl.col(col).round(2).alias(col)
+                    )
+
             # Save to CSV
-            df.write_csv(path)
+            # Use the float_precision argument to ensure proper floating point formatting
+            df_to_save.write_csv(path, float_precision=2)
         except Exception as e:
             print(f"Error saving DataFrame to {path}: {str(e)}")
