@@ -24,6 +24,7 @@ def setup_directories():
     """Create necessary directories for the application."""
     os.makedirs("input", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
+    os.makedirs("output", exist_ok=True)
 
 
 def log_error(error_message, traceback_str):
@@ -75,7 +76,8 @@ def main():
     1. Load configuration
     2. Initialize data components
     3. Load and process financial data
-    4. Launch the dashboard
+    4. Generate all visualization datasets
+    5. Launch the dashboard
 
     Returns:
         int: Exit code (0 for success, 1 for error)
@@ -145,46 +147,32 @@ def main():
 
         # Process savings data if available
         df_savings = None
-        df_savings_monthly = None
-
         if "savings" in raw_dfs and raw_dfs["savings"] is not None:
             print("Processing savings data...")
             df_savings = process.process_savings_data(raw_dfs["savings"])
             print(f"Processed {len(df_savings)} savings records")
 
-            print("Calculating monthly savings totals...")
-            df_savings_monthly = process.calculate_savings_totals(df_savings)
-            print(
-                f"Generated monthly savings summary for {len(df_savings_monthly.select(pl.col('Month').unique()))} months"
-            )
-
             # Save processed savings data
             processed_savings_path = config.get("processed_savings_path")
-            monthly_savings_path = config.get("monthly_savings_path")
 
             if processed_savings_path:
                 df_savings.write_csv(processed_savings_path)
                 print(f"Saved processed savings to {processed_savings_path}")
-
-            if monthly_savings_path:
-                df_savings_monthly.write_csv(monthly_savings_path)
-                print(f"Saved monthly savings summary to {monthly_savings_path}")
         else:
             print("No savings data available, checking for cached processed data...")
             df_savings = load_from_cache(
                 config.get("processed_savings_path"),
                 "Loading processed savings data from cache",
             )
-            df_savings_monthly = load_from_cache(
-                config.get("monthly_savings_path"),
-                "Loading monthly savings data from cache",
-            )
+
+        # Generate all intermediate datasets for visualization
+        print("Generating visualization datasets...")
+        process.generate_all_datasets(df_expenses, df_income, df_savings)
+        print("Visualization datasets generated successfully")
 
         # Initialize and run dashboard
         print("Initializing dashboard...")
-        dashboard = FinanceDashboard(
-            df_expenses, df_income, df_savings, df_savings_monthly
-        )
+        dashboard = FinanceDashboard(config)
         print("Starting dashboard server...")
         dashboard.run_server(debug=True)
 

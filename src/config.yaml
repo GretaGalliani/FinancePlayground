@@ -15,6 +15,29 @@ processed_savings_path: "input/finance_processed_savings.csv"
 monthly_savings_path: "input/finance_monthly_savings.csv"
 
 ###############
+# OUTPUT DATASETS
+###############
+output_folder: "output"
+
+# Monthly summary datasets
+monthly_expenses_path: "output/monthly_expenses.csv"
+monthly_income_path: "output/monthly_income.csv"
+monthly_summary_path: "output/monthly_summary.csv"
+
+# Expenses breakdown
+expenses_by_category_path: "output/expenses_by_category.csv"
+expenses_stacked_path: "output/expenses_stacked.csv"
+
+# Income breakdown
+income_by_category_path: "output/income_by_category.csv"
+income_stacked_path: "output/income_stacked.csv"
+
+# Savings datasets
+savings_metrics_path: "output/savings_metrics.csv"
+savings_by_category_path: "output/savings_by_category.csv"
+savings_allocation_path: "output/savings_allocation.csv"
+
+###############
 # COLUMN MAPPINGS
 ###############
 
@@ -37,9 +60,8 @@ savings_column_mapping:
   "Data": "Date"
   "Descrizione": "Description"
   "Categoria": "Category" 
-  "Account": "Account"
+  "Tipo categoria": "CategoryType"
   "Importo": "Value"
-  "Tipo": "Type"
 
 ###############
 # SHEET NAMES
