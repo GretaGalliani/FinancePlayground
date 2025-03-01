@@ -116,3 +116,36 @@ valid_savings_categories:
 
 # Default category to use for unmapped or null categories
 default_category: "Varie"  # Miscellaneous
+
+###############
+# COLOR PALETTE
+###############
+color_palette:
+  income: "#4ade80"  # Vibrant green for income
+  expense: "#f87171"  # Coral red for expenses
+  balance: "#60a5fa"  # Royal blue for balance/net
+  background: "#f8fafc"  # Light blue-gray background
+  savings:
+    general: "#a78bfa"      # Purple for general savings
+    vacation: "#fbbf24"      # Golden yellow for vacation fund
+    therapy: "#2dd4bf"       # Teal for therapy fund
+    misc: "#475569"          # Slate for miscellaneous fund
+    total: "#8b5cf6"         # Violet for total savings
+    allocation: "#f97316"    # Orange for allocations
+    spent: "#22c55e"         # Green for spent
+  categories:
+    - "#f87171"  # Red
+    - "#60a5fa"  # Blue
+    - "#a78bfa"  # Purple
+    - "#fbbf24"  # Yellow
+    - "#4ade80"  # Green
+    - "#2dd4bf"  # Teal
+    - "#f97316"  # Orange
+    - "#8b5cf6"  # Violet
+    - "#fb7185"  # Pink
+    - "#94a3b8"  # Gray
+    - "#6366f1"  # Indigo
+    - "#ec4899"  # Hot Pink
+    - "#14b8a6"  # Turquoise
+    - "#facc15"  # Amber
+    - "#a3e635"  # Lime

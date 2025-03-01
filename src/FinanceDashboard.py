@@ -47,29 +47,8 @@ class FinanceDashboard:
             ],
         )
 
-        # Define color theme
-        self.color_theme = {
-            "income": "#2ecc71",  # Green for income
-            "expense": "#e74c3c",  # Red for expenses
-            "balance": "#3498db",  # Blue for balance/net
-            "background": "#f8f9fa",  # Light background
-            "savings": {
-                "general": "#9b59b6",  # Purple for general savings
-                "vacation": "#f1c40f",  # Yellow for vacation fund
-                "therapy": "#1abc9c",  # Turquoise for therapy fund
-                "misc": "#34495e",  # Dark blue for miscellaneous fund
-                "total": "#8e44ad",  # Dark purple for total savings
-                "allocation": "#e67e22",  # Orange for allocations
-                "spent": "#27ae60",  # Green for spent
-            },
-            "categories": [
-                "#e74c3c",
-                "#3498db",
-                "#9b59b6",
-                "#f1c40f",
-                "#2ecc71",
-            ],  # Color palette for categories
-        }
+        # Get color palette from config or use default modern palette
+        self.color_theme = config.get("color_palette", {})
 
         # Load the initial datasets
         self._load_datasets()
@@ -186,10 +165,15 @@ class FinanceDashboard:
     # Dashboard Setup Methods
     #
     def _setup_layout(self):
-        """Set up the dashboard layout."""
-        # Calculate default date range (6 months before today)
+        """Set up the dashboard layout with the new date range default."""
+        # Calculate default date range (January 1 of current year to today)
+        today = datetime.now()
         end_date = self.max_date
-        start_date = max(self.min_date, end_date - timedelta(days=180))  # Last 6 months
+        start_date = datetime(today.year, 1, 1)  # January 1 of current year
+
+        # Make sure start_date is not before the earliest data
+        if start_date < self.min_date:
+            start_date = self.min_date
 
         self.app.layout = dbc.Container(
             [
@@ -214,12 +198,12 @@ class FinanceDashboard:
                     ],
                     className="mb-4",
                 ),
-                html.Div(id="summary-cards"),
                 # Tabs for different views
                 dbc.Tabs(
                     [
                         dbc.Tab(
                             [
+                                html.Div(id="expense-income-cards", className="mb-4"),
                                 dcc.Graph(id="main-dashboard"),
                                 dcc.Graph(id="category-dashboard"),
                                 dcc.Graph(id="stacked-expenses"),
@@ -229,6 +213,10 @@ class FinanceDashboard:
                         ),
                         dbc.Tab(
                             [
+                                # Same summary cards added to income tab
+                                html.Div(
+                                    id="expense-income-cards-copy", className="mb-4"
+                                ),
                                 dcc.Graph(id="income-overview"),
                                 dcc.Graph(id="stacked-income"),
                                 dcc.Graph(id="income-categories"),
@@ -266,11 +254,12 @@ class FinanceDashboard:
         )
 
     def _setup_callbacks(self):
-        """Set up the dashboard callbacks."""
+        """Set up the dashboard callbacks with the new card structure."""
 
         @self.app.callback(
             [
-                Output("summary-cards", "children"),
+                Output("expense-income-cards", "children"),
+                Output("expense-income-cards-copy", "children"),
                 Output("main-dashboard", "figure"),
                 Output("category-dashboard", "figure"),
                 Output("stacked-expenses", "figure"),
@@ -359,7 +348,8 @@ class FinanceDashboard:
             savings_table = self._create_savings_table(filtered_processed_savings)
 
             return (
-                summary_cards,
+                summary_cards,  # For expenses tab
+                summary_cards,  # Same cards for income tab
                 fig_main_overview,
                 fig_expense_categories,
                 fig_expenses,
