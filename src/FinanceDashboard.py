@@ -198,31 +198,53 @@ class FinanceDashboard:
                     ],
                     className="mb-4",
                 ),
+                # Income & Expense cards placed above tabs
+                html.Div(id="income-expense-cards", className="mb-4 mt-4"),
                 # Tabs for different views
                 dbc.Tabs(
                     [
                         dbc.Tab(
                             [
-                                html.Div(id="expense-income-cards", className="mb-4"),
-                                dcc.Graph(id="main-dashboard"),
-                                dcc.Graph(id="category-dashboard"),
-                                dcc.Graph(id="stacked-expenses"),
-                            ],
-                            label="Expenses",
-                            tab_id="expenses-tab",
-                        ),
-                        dbc.Tab(
-                            [
-                                # Same summary cards added to income tab
-                                html.Div(
-                                    id="expense-income-cards-copy", className="mb-4"
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="main-dashboard"),
+                                            width=12,
+                                            className="mb-4",
+                                        ),
+                                    ]
                                 ),
-                                dcc.Graph(id="income-overview"),
-                                dcc.Graph(id="stacked-income"),
-                                dcc.Graph(id="income-categories"),
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="expense-pie-chart"),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                        dbc.Col(
+                                            dcc.Graph(id="income-pie-chart"),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="stacked-expenses"),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                        dbc.Col(
+                                            dcc.Graph(id="stacked-income"),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
                             ],
-                            label="Income",
-                            tab_id="income-tab",
+                            label="Expenses & Income",
+                            tab_id="expenses-tab",
                         ),
                         dbc.Tab(
                             [
@@ -258,14 +280,12 @@ class FinanceDashboard:
 
         @self.app.callback(
             [
-                Output("expense-income-cards", "children"),
-                Output("expense-income-cards-copy", "children"),
+                Output("income-expense-cards", "children"),
                 Output("main-dashboard", "figure"),
-                Output("category-dashboard", "figure"),
+                Output("expense-pie-chart", "figure"),
+                Output("income-pie-chart", "figure"),
                 Output("stacked-expenses", "figure"),
-                Output("income-overview", "figure"),
                 Output("stacked-income", "figure"),
-                Output("income-categories", "figure"),
                 Output("savings-cards", "children"),
                 Output("savings-overview", "figure"),
                 Output("savings-breakdown", "figure"),
@@ -324,17 +344,16 @@ class FinanceDashboard:
             # Create dashboard elements
             summary_cards = self._create_summary_cards(filtered_monthly_summary)
             fig_main_overview = self._create_monthly_overview(filtered_monthly_summary)
-            fig_expense_categories = self._create_expense_category_overview(
+            fig_expense_pie_chart = self._create_expense_category_overview(
                 filtered_monthly_summary
             )
-            fig_expenses = self._create_stacked_expenses(filtered_expenses_stacked)
-
-            # Create income elements
-            fig_income_overview = self._create_income_overview(filtered_monthly_summary)
-            fig_income = self._create_stacked_income(filtered_income_stacked)
-            fig_income_categories = self._create_income_category_breakdown(
+            fig_income_pie_chart = self._create_income_category_overview(
                 filtered_monthly_summary
             )
+            fig_stacked_expenses = self._create_stacked_expenses(
+                filtered_expenses_stacked
+            )
+            fig_stacked_income = self._create_stacked_income(filtered_income_stacked)
 
             # Create savings elements
             savings_cards = self._create_savings_summary_cards(filtered_savings_metrics)
@@ -348,14 +367,12 @@ class FinanceDashboard:
             savings_table = self._create_savings_table(filtered_processed_savings)
 
             return (
-                summary_cards,  # For expenses tab
-                summary_cards,  # Same cards for income tab
+                summary_cards,  # Income-expense cards now above all tabs
                 fig_main_overview,
-                fig_expense_categories,
-                fig_expenses,
-                fig_income_overview,
-                fig_income,
-                fig_income_categories,
+                fig_expense_pie_chart,
+                fig_income_pie_chart,
+                fig_stacked_expenses,
+                fig_stacked_income,
                 savings_cards,
                 fig_savings,
                 fig_savings_breakdown,
@@ -366,9 +383,10 @@ class FinanceDashboard:
     #
     # Summary Card Methods
     #
+
     def _create_summary_cards(self, df_monthly_summary):
         """
-        Create summary cards for income, expenses, and balance.
+        Create summary cards for income, expenses, and balance with styling matching savings cards.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
@@ -383,6 +401,7 @@ class FinanceDashboard:
         total_expenses = df_monthly_summary["Expenses"].sum()
         total_balance = total_income - total_expenses
 
+        # Use the same card styling and layout as savings cards
         cards = dbc.Row(
             [
                 dbc.Col(
@@ -395,10 +414,19 @@ class FinanceDashboard:
                                     className="card-text",
                                     style={"color": self.color_theme["income"]},
                                 ),
+                                html.P(
+                                    f"Based on {len(df_monthly_summary)} months",
+                                    className="text-muted small",
+                                ),
                             ]
                         ),
                         className="shadow-sm",
-                    )
+                        style={
+                            "background-color": "#fffffe",
+                            "border-color": self.color_theme["income"],
+                        },
+                    ),
+                    width=4,
                 ),
                 dbc.Col(
                     dbc.Card(
@@ -410,10 +438,23 @@ class FinanceDashboard:
                                     className="card-text",
                                     style={"color": self.color_theme["expense"]},
                                 ),
+                                html.P(
+                                    (
+                                        f"Monthly average: {total_expenses / len(df_monthly_summary):.2f} €"
+                                        if len(df_monthly_summary) > 0
+                                        else ""
+                                    ),
+                                    className="text-muted small",
+                                ),
                             ]
                         ),
                         className="shadow-sm",
-                    )
+                        style={
+                            "background-color": "#fffffe",
+                            "border-color": self.color_theme["expense"],
+                        },
+                    ),
+                    width=4,
                 ),
                 dbc.Col(
                     dbc.Card(
@@ -425,10 +466,19 @@ class FinanceDashboard:
                                     className="card-text",
                                     style={"color": self.color_theme["balance"]},
                                 ),
+                                html.P(
+                                    f"Income - Expenses",
+                                    className="text-muted small",
+                                ),
                             ]
                         ),
                         className="shadow-sm",
-                    )
+                        style={
+                            "background-color": "#fffffe",
+                            "border-color": self.color_theme["balance"],
+                        },
+                    ),
+                    width=4,
                 ),
             ],
             className="mb-4",
@@ -438,7 +488,7 @@ class FinanceDashboard:
 
     def _create_savings_summary_cards(self, df_savings_metrics):
         """
-        Create summary cards for savings data.
+        Create summary cards for savings data with updated styling.
 
         Args:
             df_savings_metrics: DataFrame with savings metrics
@@ -474,7 +524,10 @@ class FinanceDashboard:
                                         "color": self.color_theme["savings"]["total"]
                                     },
                                 ),
-                                html.P(f"As of {latest_month}", className="text-muted"),
+                                html.P(
+                                    f"As of {latest_month}",
+                                    className="text-muted small",
+                                ),
                                 html.P(
                                     "All 'Risparmio' type categories",
                                     className="text-muted small",
@@ -482,6 +535,10 @@ class FinanceDashboard:
                             ]
                         ),
                         className="shadow-sm",
+                        style={
+                            "background-color": "#fffffe",
+                            "border-color": self.color_theme["savings"]["total"],
+                        },
                     ),
                     width=4,
                 ),
@@ -501,11 +558,15 @@ class FinanceDashboard:
                                 ),
                                 html.P(
                                     "All 'Accantonamento' type categories (additions minus withdrawals)",
-                                    className="text-muted",
+                                    className="text-muted small",
                                 ),
                             ]
                         ),
                         className="shadow-sm",
+                        style={
+                            "background-color": "#fffffe",
+                            "border-color": self.color_theme["savings"]["allocation"],
+                        },
                     ),
                     width=4,
                 ),
@@ -523,11 +584,15 @@ class FinanceDashboard:
                                 ),
                                 html.P(
                                     "Withdrawals from non-Accantonamento categories",
-                                    className="text-muted",
+                                    className="text-muted small",
                                 ),
                             ]
                         ),
                         className="shadow-sm",
+                        style={
+                            "background-color": "#fffffe",
+                            "border-color": self.color_theme["savings"]["spent"],
+                        },
                     ),
                     width=4,
                 ),
@@ -540,9 +605,9 @@ class FinanceDashboard:
     #
     # Income Visualization Methods
     #
-    def _create_income_overview(self, df_monthly_summary):
+    def _create_income_category_overview(self, df_monthly_summary):
         """
-        Create an income overview figure.
+        Create an elegant donut chart for income categories.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
@@ -550,15 +615,14 @@ class FinanceDashboard:
         Returns:
             go.Figure: Plotly figure for the dashboard
         """
-        if df_monthly_summary is None or len(df_monthly_summary) == 0:
+        if self.df_income_by_category is None or len(self.df_income_by_category) == 0:
             fig = go.Figure()
             fig.update_layout(
-                title="Monthly Income Overview - No Data Available",
-                yaxis=dict(title="Amount (€)"),
+                title="Income Categories - No Data Available",
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
-                        text="No data available for selected period",
+                        text="No income category data available",
                         showarrow=False,
                         xref="paper",
                         yref="paper",
@@ -569,22 +633,36 @@ class FinanceDashboard:
             )
             return fig
 
-        # Create a bar chart for income
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=df_monthly_summary["Month"],
-                y=df_monthly_summary["Income"],
-                name="Income",
-                marker_color=self.color_theme["income"],
-            )
+        # Create a donut chart for income categories
+        labels = self.df_income_by_category["Category"].to_list()
+        values = self.df_income_by_category["Total"].to_list()
+
+        # Use a distinct part of the color palette for income categories
+        # to differentiate from expense categories
+        colors = self.color_theme["categories"][8 : 8 + len(labels)]
+        if len(colors) < len(labels):
+            colors = colors * (len(labels) // len(colors) + 1)
+
+        fig = go.Figure(
+            data=[
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    hole=0.6,  # Set a larger hole for an elegant donut
+                    textinfo="label+percent",
+                    marker=dict(colors=colors),
+                    textposition="outside",
+                    textfont=dict(size=12),
+                )
+            ]
         )
 
-        fig.update_layout(
-            title="Monthly Income Overview",
-            yaxis=dict(title="Amount (€)"),
-            plot_bgcolor=self.color_theme["background"],
-            hovermode="x",
+        fig = self._update_figure_styling(fig, "Income Breakdown by Category")
+
+        # Additional styling specific to donut charts
+        fig.update_traces(
+            hoverinfo="label+percent+value",
+            hovertemplate="%{label}: %{value:.2f}€ (%{percent})<extra></extra>",
         )
 
         return fig
@@ -630,6 +708,78 @@ class FinanceDashboard:
 
         return fig
 
+    def _create_stacked_expenses(self, df_expenses_stacked):
+        """
+        Create a stacked bar chart for expenses by category.
+
+        Args:
+            df_expenses_stacked: DataFrame with expenses by month and category
+
+        Returns:
+            go.Figure: Plotly figure for the dashboard
+        """
+        if df_expenses_stacked is None or len(df_expenses_stacked) == 0:
+            fig = go.Figure()
+            fig = self._update_figure_styling(
+                fig, "Monthly Expense Breakdown - No Data Available"
+            )
+            fig.update_layout(
+                yaxis=dict(title="Amount (€)"),
+                annotations=[
+                    dict(
+                        text="No data available for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        unique_categories = df_expenses_stacked["Category"].unique().to_list()
+        colors = self.color_theme["categories"][: len(unique_categories)]
+        if len(colors) < len(unique_categories):
+            colors = colors * (len(unique_categories) // len(colors) + 1)
+
+        fig = go.Figure()
+
+        # Get all months for consistent x-axis
+        all_months = sorted(df_expenses_stacked["Month"].unique().to_list())
+
+        for category, color in zip(unique_categories, colors):
+            filtered = df_expenses_stacked.filter(pl.col("Category") == category)
+
+            # Create a dict for easy month lookup
+            expenses_by_month = {
+                row["Month"]: row["Expenses"] for row in filtered.rows(named=True)
+            }
+
+            # Create y-values for all months (with 0 for missing months)
+            y_values = [expenses_by_month.get(month, 0) for month in all_months]
+
+            fig.add_trace(
+                go.Bar(
+                    x=all_months,
+                    y=y_values,
+                    name=category,
+                    marker_color=color,
+                )
+            )
+
+        fig = self._update_figure_styling(fig, "Monthly Expense Breakdown")
+        fig.update_layout(
+            barmode="stack",
+            yaxis=dict(title="Amount (€)"),
+            showlegend=True,
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+            margin=dict(l=50, r=50, t=50, b=50),
+            hovermode="x",
+        )
+
+        return fig
+
     def _create_stacked_income(self, df_income_stacked):
         """
         Create a stacked bar chart for income by category.
@@ -642,10 +792,11 @@ class FinanceDashboard:
         """
         if df_income_stacked is None or len(df_income_stacked) == 0:
             fig = go.Figure()
+            fig = self._update_figure_styling(
+                fig, "Monthly Income Breakdown - No Data Available"
+            )
             fig.update_layout(
-                title="Monthly Income Breakdown - No Data Available",
                 yaxis=dict(title="Amount (€)"),
-                plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
                         text="No data available for selected period",
@@ -660,32 +811,80 @@ class FinanceDashboard:
             return fig
 
         unique_categories = df_income_stacked["Category"].unique().to_list()
-        colors = self.color_theme["categories"] * (
-            len(unique_categories) // len(self.color_theme["categories"]) + 1
-        )
+        # Use a different part of the color palette for income categories
+        colors = self.color_theme["categories"][8 : 8 + len(unique_categories)]
+        if len(colors) < len(unique_categories):
+            colors = colors * (len(unique_categories) // len(colors) + 1)
 
         fig = go.Figure()
 
+        # Get all months for consistent x-axis
+        all_months = sorted(df_income_stacked["Month"].unique().to_list())
+
         for category, color in zip(unique_categories, colors):
             filtered = df_income_stacked.filter(pl.col("Category") == category)
+
+            # Create a dict for easy month lookup
+            income_by_month = {
+                row["Month"]: row["Income"] for row in filtered.rows(named=True)
+            }
+
+            # Create y-values for all months (with 0 for missing months)
+            y_values = [income_by_month.get(month, 0) for month in all_months]
+
             fig.add_trace(
                 go.Bar(
-                    x=filtered["Month"].to_list(),
-                    y=filtered["Income"].to_list(),
+                    x=all_months,
+                    y=y_values,
                     name=category,
                     marker_color=color,
                 )
             )
 
+        fig = self._update_figure_styling(fig, "Monthly Income Breakdown")
         fig.update_layout(
-            title="Monthly Income Breakdown",
             barmode="stack",
             yaxis=dict(title="Amount (€)"),
-            plot_bgcolor=self.color_theme["background"],
             showlegend=True,
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
             margin=dict(l=50, r=50, t=50, b=50),
             hovermode="x",
+        )
+
+        return fig
+
+    def _update_figure_styling(self, fig, title):
+        """
+        Apply consistent styling to all figures based on the color theme.
+
+        Args:
+            fig: Plotly figure to update
+            title: Title for the figure
+
+        Returns:
+            go.Figure: Updated figure with consistent styling
+        """
+        fig.update_layout(
+            title=title,
+            plot_bgcolor=self.color_theme["background"],  # Background color
+            paper_bgcolor=self.color_theme["background"],  # Background color
+            font=dict(color="#232323"),  # Headline color for text
+            yaxis=dict(
+                titlefont=dict(color="#232323"),  # Headline color
+                tickfont=dict(color="#222525"),  # Paragraph color
+                gridcolor="rgba(35, 35, 35, 0.1)",  # Stroke color with opacity
+            ),
+            xaxis=dict(
+                titlefont=dict(color="#232323"),  # Headline color
+                tickfont=dict(color="#222525"),  # Paragraph color
+                gridcolor="rgba(35, 35, 35, 0.1)",  # Stroke color with opacity
+            ),
+            legend=dict(
+                font=dict(color="#222525"),  # Paragraph color
+                bgcolor="#fffffe",  # Main illustration color
+                bordercolor="#232323",  # Stroke color
+            ),
+            margin=dict(l=50, r=50, t=60, b=50),
         )
 
         return fig
@@ -744,7 +943,7 @@ class FinanceDashboard:
 
     def _create_expense_category_overview(self, df_monthly_summary):
         """
-        Create an expense category overview figure.
+        Create an elegant donut chart for expense categories.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
@@ -773,15 +972,35 @@ class FinanceDashboard:
             )
             return fig
 
-        # Create a pie chart for expense categories
+        # Create a donut chart for expense categories
         labels = self.df_expenses_by_category["Category"].to_list()
         values = self.df_expenses_by_category["Total"].to_list()
 
-        fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=0.3)])
+        # Use a custom color palette for the expense categories
+        colors = self.color_theme["categories"][: len(labels)]
+        if len(colors) < len(labels):
+            colors = colors * (len(labels) // len(colors) + 1)
 
-        fig.update_layout(
-            title="Expense Breakdown by Category",
-            plot_bgcolor=self.color_theme["background"],
+        fig = go.Figure(
+            data=[
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    hole=0.6,  # Set a larger hole for an elegant donut
+                    textinfo="label+percent",
+                    marker=dict(colors=colors),
+                    textposition="outside",
+                    textfont=dict(size=12),
+                )
+            ]
+        )
+
+        fig = self._update_figure_styling(fig, "Expense Breakdown by Category")
+
+        # Additional styling specific to donut charts
+        fig.update_traces(
+            hoverinfo="label+percent+value",
+            hovertemplate="%{label}: %{value:.2f}€ (%{percent})<extra></extra>",
         )
 
         return fig
