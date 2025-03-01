@@ -159,3 +159,12 @@ color_palette:
     - "#f8b1a8"  # Muted light coral
     - "#797168"  # Warm taupe
     - "#bde3e3"  # Pale teal
+
+
+###############
+# FONTS
+###############
+fonts:
+  title_font: "Montserrat"
+  body_font: "Open Sans"
+  font_url: "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap"

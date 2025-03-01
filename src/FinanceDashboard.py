@@ -38,12 +38,26 @@ class FinanceDashboard:
         """
         self.config = config
 
-        # Initialize the Dash app
+        # Get font configuration from config, or use defaults
+        fonts = self.config.get(
+            "fonts",
+            {
+                "title_font": "Montserrat",
+                "body_font": "Open Sans",
+                "font_url": "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap",
+            },
+        )
+
+        # Initialize the Dash app with external stylesheets
         self.app = dash.Dash(
             __name__,
             external_stylesheets=[
                 dbc.themes.BOOTSTRAP,
                 "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
+                fonts.get(
+                    "font_url",
+                    "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap",
+                ),
             ],
         )
 
@@ -165,7 +179,7 @@ class FinanceDashboard:
     # Dashboard Setup Methods
     #
     def _setup_layout(self):
-        """Set up the dashboard layout with the new date range default."""
+        """Set up the dashboard layout with the new date range default and consistent styling."""
         # Calculate default date range (January 1 of current year to today)
         today = datetime.now()
         end_date = self.max_date
@@ -175,10 +189,37 @@ class FinanceDashboard:
         if start_date < self.min_date:
             start_date = self.min_date
 
+        # Get font configuration from config, or use defaults
+        fonts = self.config.get(
+            "fonts",
+            {
+                "title_font": "Montserrat",
+                "body_font": "Open Sans",
+                "font_url": "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap",
+            },
+        )
+
+        title_font = fonts.get("title_font", "Montserrat")
+        body_font = fonts.get("body_font", "Open Sans")
+
+        # Apply styles directly to components instead of using html.Style
+        body_style = {
+            "backgroundColor": self.color_theme["background"],
+            "fontFamily": f'"{body_font}", sans-serif',
+        }
+
+        heading_style = {
+            "fontFamily": f'"{title_font}", sans-serif',
+            "fontWeight": "600",
+            "color": self.color_theme.get("headline", "#232323"),
+        }
+
         self.app.layout = dbc.Container(
             [
                 html.H1(
-                    "Personal Finance Dashboard", className="text-center mt-4 mb-4"
+                    "Personal Finance Dashboard",
+                    className="text-center mt-4 mb-4",
+                    style=heading_style,
                 ),
                 dbc.Row(
                     [
@@ -190,6 +231,7 @@ class FinanceDashboard:
                                     max_date_allowed=self.max_date,
                                     start_date=start_date,
                                     end_date=end_date,
+                                    style={"backgroundColor": "#ffffff"},
                                 )
                             ],
                             width={"size": 6, "offset": 3},
@@ -245,6 +287,10 @@ class FinanceDashboard:
                             ],
                             label="Expenses & Income",
                             tab_id="expenses-tab",
+                            style={"backgroundColor": self.color_theme["background"]},
+                            tab_style={
+                                "backgroundColor": self.color_theme["background"]
+                            },
                         ),
                         dbc.Tab(
                             [
@@ -261,18 +307,28 @@ class FinanceDashboard:
                                     className="mb-4",
                                 ),
                                 dcc.Graph(id="savings-allocation"),
-                                html.H4("Savings Transactions", className="mt-4 mb-3"),
+                                html.H4(
+                                    "Savings Transactions",
+                                    className="mt-4 mb-3",
+                                    style=heading_style,
+                                ),
                                 html.Div(id="savings-table"),
                             ],
                             label="Savings",
                             tab_id="savings-tab",
+                            style={"backgroundColor": self.color_theme["background"]},
+                            tab_style={
+                                "backgroundColor": self.color_theme["background"]
+                            },
                         ),
                     ],
                     id="dashboard-tabs",
                     active_tab="expenses-tab",
+                    style={"backgroundColor": self.color_theme["background"]},
                 ),
             ],
             fluid=True,
+            style=body_style,
         )
 
     def _setup_callbacks(self):
