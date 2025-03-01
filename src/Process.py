@@ -204,45 +204,53 @@ class Process:
                 }
             )
 
-        # First, add the Month column and flag for allocation types
+        # First, add the Month column and map the transaction types correctly
         df_with_month = df.with_columns(
             [
                 pl.col("Date").dt.strftime("%Y-%m").alias("Month"),
-                pl.when(
-                    (pl.col("Type") == "Allocation")
-                    | (pl.col("Type") == "Accantonamento")
-                )
-                .then(pl.lit(True))
-                .otherwise(pl.lit(False))
-                .alias("IsAllocation"),
+                # Determine AllocationType based on the specific meaning of each Type
+                pl.when(pl.col("Type") == "Accantonamento")
+                .then(pl.lit("Allocation"))
+                .otherwise(
+                    pl.lit("Spent")
+                )  # Trasferimento and Pagamento are both "Spent"
+                .alias("AllocationType"),
             ]
+        )
+
+        # Add an IsAllocation field for internal use (needed for calculations)
+        df_with_month = df_with_month.with_columns(
+            pl.when(pl.col("AllocationType") == "Allocation")
+            .then(pl.lit(True))
+            .otherwise(pl.lit(False))
+            .alias("IsAllocation")
         )
 
         # Group by month, category, account, and allocation type
         monthly_aggregates = df_with_month.groupby(
-            ["Month", "Category", "Account", "IsAllocation"]
+            ["Month", "Category", "Account", "AllocationType"]
         ).agg(pl.sum("Value").alias("MonthlyValue"))
 
-        # Process each Category-Account-IsAllocation group separately
+        # Process each Category-Account-AllocationType group separately
         # We'll build the results step by step
         result_frames = []
 
         # Get all unique combinations
         unique_combinations = df_with_month.select(
-            pl.col("Category"), pl.col("Account"), pl.col("IsAllocation")
+            pl.col("Category"), pl.col("Account"), pl.col("AllocationType")
         ).unique()
 
         # For each combination, calculate running totals
         for row in unique_combinations.iter_rows(named=True):
             category = row["Category"]
             account = row["Account"]
-            is_allocation = row["IsAllocation"]
+            allocation_type = row["AllocationType"]
 
             # Filter data for this combination
             filtered = monthly_aggregates.filter(
                 (pl.col("Category") == category)
                 & (pl.col("Account") == account)
-                & (pl.col("IsAllocation") == is_allocation)
+                & (pl.col("AllocationType") == allocation_type)
             ).sort("Month")
 
             # If there's data for this combination
@@ -264,25 +272,32 @@ class Process:
                     "Month": [],
                     "Category": [],
                     "Account": [],
-                    "IsAllocation": [],
+                    "AllocationType": [],
                     "MonthlyValue": [],
                     "TotalValue": [],
                 }
             )
 
-        # Create a readable allocation type column
+        # Add IsAllocation column for backward compatibility
         all_results = all_results.with_columns(
-            pl.when(pl.col("IsAllocation"))
-            .then(pl.lit("Allocation"))
-            .otherwise(pl.lit("Spent"))
-            .alias("AllocationType")
+            pl.when(pl.col("AllocationType") == "Allocation")
+            .then(pl.lit(True))
+            .otherwise(pl.lit(False))
+            .alias("IsAllocation")
         )
 
-        # Calculate total savings across all categories (only for spent amounts)
+        # Calculate total savings across all categories
+        # Only include "Trasferimento" transactions as real savings
+        # Filter for "Spent" AllocationType and Type is not "Pagamento"
+        savings_data = df_with_month.filter(
+            (pl.col("AllocationType") == "Spent") & (pl.col("Type") == "Trasferimento")
+        )
+
+        # Group by month and calculate total savings
         total_savings = (
-            all_results.filter(~pl.col("IsAllocation"))
-            .groupby("Month")
-            .agg(pl.sum("TotalValue").alias("TotalSavings"))
+            savings_data.groupby("Month")
+            .agg(pl.sum("Value").alias("MonthlySavings"))
+            .with_columns(pl.col("MonthlySavings").cum_sum().alias("TotalSavings"))
         )
 
         # Join the total savings back to all results
