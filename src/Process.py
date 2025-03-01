@@ -425,14 +425,29 @@ class Process:
             total_savings += month_savings
 
             # 2. ALLOCATED FUNDS - All Allocation type category transactions (positive values)
+            # Only consider positive values for allocated funds (adding to allocations)
             alloc_data = month_data.filter(
                 (pl.col("CategoryType") == "Accantonamento") & (pl.col("Value") > 0)
             )
             month_allocated = alloc_data["Value"].sum() or 0.0
-            total_allocated += month_allocated
 
-            # 3. SPENT FUNDS - All negative transactions (from either category type)
-            spent_data = month_data.filter(pl.col("Value") < 0)
+            # Subtract negative values for withdrawals from allocations
+            alloc_withdrawal_data = month_data.filter(
+                (pl.col("CategoryType") == "Accantonamento") & (pl.col("Value") < 0)
+            )
+            month_allocated_withdrawals = abs(
+                alloc_withdrawal_data["Value"].sum() or 0.0
+            )
+
+            # Adjust the total allocated funds
+            total_allocated = (
+                total_allocated + month_allocated - month_allocated_withdrawals
+            )
+
+            # 3. SPENT FUNDS - Only consider non-Accantonamento withdrawals
+            spent_data = month_data.filter(
+                (pl.col("CategoryType") != "Accantonamento") & (pl.col("Value") < 0)
+            )
             month_spent = abs(
                 spent_data["Value"].sum() or 0.0
             )  # Make positive for display
