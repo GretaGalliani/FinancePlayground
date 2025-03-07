@@ -168,3 +168,28 @@ fonts:
   title_font: "Montserrat"
   body_font: "Open Sans"
   font_url: "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap"
+
+###############
+# DASHBOARD SETTINGS
+###############
+date_display_format: "DD/MM/YYYY"
+
+# Chart styling parameters
+chart_styling:
+  # Legend positioning
+  legend_orientation: "h"
+  legend_yanchor: "bottom"
+  legend_y: -0.2
+  legend_xanchor: "center" 
+  legend_x: 0.5
+  
+  # Margins
+  margin_left: 50
+  margin_right: 50
+  margin_top: 60
+  margin_bottom: 80
+  
+  # Hover styling
+  hover_bgcolor: "white"
+  hover_font_size: 14
+  hover_font_family: "Open Sans"

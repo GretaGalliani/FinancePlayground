@@ -10,9 +10,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-def setup_logger(name="finance_dashboard", level=logging.INFO):
+def create_logger(name, level=logging.INFO):
     """
-    Set up a logger with file and console handlers.
+    Create a logger with file handler only (no console output).
 
     Args:
         name: Name of the logger
@@ -32,29 +32,21 @@ def setup_logger(name="finance_dashboard", level=logging.INFO):
     if logger.handlers:
         logger.handlers.clear()
 
-    # Create formatters
+    # Create formatter
     file_formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
-    console_formatter = logging.Formatter("%(levelname)s: %(message)s")
 
     # Create file handler with timestamp in filename
-    timestamp = datetime.now().strftime("%Y%m%d")
-    file_handler = logging.FileHandler(f"logs/finance_dashboard_{timestamp}.log")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_handler = logging.FileHandler(f"logs/finance_{timestamp}.log")
     file_handler.setLevel(level)
     file_handler.setFormatter(file_formatter)
 
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(level)
-    console_handler.setFormatter(console_formatter)
-
-    # Add handlers to logger
+    # Add handler to logger
     logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+
+    # Prevent propagation to parent loggers (including root logger)
+    logger.propagate = False
 
     return logger
-
-
-# Create a default logger
-logger = setup_logger()

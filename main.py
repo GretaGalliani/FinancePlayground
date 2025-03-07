@@ -1,3 +1,4 @@
+#!/filepath: main.py
 """
 Main module for the Finance Dashboard application.
 
@@ -17,7 +18,7 @@ from src.Config import Config
 from src.DataWrangler import DataWrangler
 from src.Process import Process
 from src.FinanceDashboard import FinanceDashboard
-from src.logger import logger
+from src.logger import create_logger
 
 
 def setup_directories():
@@ -27,45 +28,153 @@ def setup_directories():
     os.makedirs("output", exist_ok=True)
 
 
-def log_error(error_message, traceback_str):
+def log_error(logger, error_message, traceback_str):
     """
-    Log errors to a file with timestamp.
+    Log errors with traceback information.
 
     Args:
+        logger: The logger to use
         error_message: The error message to log
         traceback_str: The traceback string to include
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = f"logs/error_{timestamp}.log"
-
-    with open(log_file, "w") as f:
-        f.write(f"Error occurred at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Error message: {error_message}\n\n")
-        f.write("Traceback:\n")
-        f.write(traceback_str)
-
-    print(f"Error details have been logged to {log_file}")
+    logger.error(f"Error occurred: {error_message}")
+    logger.error(f"Traceback:\n{traceback_str}")
 
 
-def load_from_cache(file_path, message=None):
+def load_from_cache(file_path, logger, message=None):
     """
     Try to load data from a cached CSV file.
 
     Args:
         file_path: Path to the CSV file
-        message: Optional message to print on successful load
+        logger: The logger to use
+        message: Optional message to log on successful load
 
     Returns:
         pl.DataFrame or None: DataFrame if loaded successfully, None otherwise
     """
     if os.path.exists(file_path):
         if message:
-            print(message)
+            logger.info(message)
         try:
             return pl.read_csv(file_path)
         except Exception as e:
-            print(f"Error loading cached data from {file_path}: {e}")
+            logger.error(f"Error loading cached data from {file_path}: {e}")
     return None
+
+
+def load_data(data_wrangler, config, logger):
+    """
+    Load data from Numbers file or cached CSVs.
+
+    Args:
+        data_wrangler: The DataWrangler instance
+        config: Configuration object
+        logger: The logger to use
+
+    Returns:
+        dict: Dictionary of raw DataFrames
+
+    Raises:
+        ValueError: If essential data cannot be loaded
+    """
+    # Try to load data from Numbers file
+    logger.info("Loading data from Numbers file...")
+    try:
+        raw_dfs = data_wrangler.load_updated_file()
+        logger.info("Successfully loaded data from Numbers file")
+
+        # Save skipped rows report if any rows were skipped
+        if data_wrangler.skipped_rows:
+            skipped_rows_path = data_wrangler.save_skipped_rows_report()
+            logger.warning(
+                f"Skipped {len(data_wrangler.skipped_rows)} rows during import. "
+                f"Report saved to {skipped_rows_path}"
+            )
+
+        return raw_dfs
+
+    except Exception as e:
+        logger.warning(f"Error loading data from Numbers file: {e}")
+        logger.info("Attempting to load data from cached CSV files...")
+
+        # Try to load from cached files
+        raw_dfs = {}
+        raw_dfs["expenses"] = load_from_cache(
+            config.get("raw_expenses_path"), logger, "Loading expenses from cache"
+        )
+        raw_dfs["income"] = load_from_cache(
+            config.get("raw_income_path"), logger, "Loading income from cache"
+        )
+        raw_dfs["savings"] = load_from_cache(
+            config.get("raw_savings_path"), logger, "Loading savings from cache"
+        )
+
+        # Check if we have the essential data
+        if raw_dfs["expenses"] is None or raw_dfs["income"] is None:
+            raise ValueError(
+                "Could not load essential data from either Numbers file or cache"
+            )
+
+        return raw_dfs
+
+
+def process_data(process, raw_dfs, config, logger):
+    """
+    Process the raw data into clean DataFrames.
+
+    Args:
+        process: The Process instance
+        raw_dfs: Dictionary of raw DataFrames
+        config: Configuration object
+        logger: The logger to use
+
+    Returns:
+        tuple: Processed expenses, income, and savings DataFrames
+    """
+    # Process expenses and income data
+    logger.info("Processing expenses data...")
+    df_expenses = process.process_expense_income_data(raw_dfs["expenses"], "expenses")
+    logger.info(f"Processed {len(df_expenses)} expense records")
+
+    logger.info("Processing income data...")
+    df_income = process.process_expense_income_data(raw_dfs["income"], "income")
+    logger.info(f"Processed {len(df_income)} income records")
+
+    # Save processed data
+    processed_expenses_path = config.get("processed_expenses_path")
+    processed_income_path = config.get("processed_income_path")
+
+    if processed_expenses_path:
+        df_expenses.write_csv(processed_expenses_path)
+        logger.info(f"Saved processed expenses to {processed_expenses_path}")
+
+    if processed_income_path:
+        df_income.write_csv(processed_income_path)
+        logger.info(f"Saved processed income to {processed_income_path}")
+
+    # Process savings data if available
+    df_savings = None
+    if "savings" in raw_dfs and raw_dfs["savings"] is not None:
+        logger.info("Processing savings data...")
+        df_savings = process.process_savings_data(raw_dfs["savings"])
+        logger.info(f"Processed {len(df_savings)} savings records")
+
+        # Save processed savings data
+        processed_savings_path = config.get("processed_savings_path")
+
+        if processed_savings_path:
+            df_savings.write_csv(processed_savings_path)
+            logger.info(f"Saved processed savings to {processed_savings_path}")
+    else:
+        logger.info("No savings data available, checking for cached processed data...")
+        df_savings = load_from_cache(
+            config.get("processed_savings_path"),
+            logger,
+            "Loading processed savings data from cache",
+        )
+
+    return df_expenses, df_income, df_savings
 
 
 def main():
@@ -82,106 +191,48 @@ def main():
     Returns:
         int: Exit code (0 for success, 1 for error)
     """
-    print("Starting Finance Dashboard application...")
+    # Setup directories
     setup_directories()
+
+    # Initialize the application logger
+    logger = create_logger("finance_dashboard")
+    logger.info("Starting Finance Dashboard application...")
 
     try:
         # Load configuration
         config_path = os.path.join(os.path.dirname(__file__), "src/config.yaml")
-        print(f"Loading configuration from {config_path}")
+        logger.info(f"Loading configuration from {config_path}")
         config = Config(config_path)
 
-        # Initialize data wrangler and process components
-        data_wrangler = DataWrangler(config)
-        process = Process(config)
+        # Initialize data wrangler and process components with logger
+        data_wrangler = DataWrangler(config, logger)
+        process = Process(config, logger)
 
-        # Try to load data from Numbers file
-        print("Loading data from Numbers file...")
-        try:
-            raw_dfs = data_wrangler.load_updated_file()
-            print("Successfully loaded data from Numbers file")
-        except Exception as e:
-            print(f"Error loading data from Numbers file: {e}")
-            print("Attempting to load data from cached CSV files...")
+        # Load data
+        raw_dfs = load_data(data_wrangler, config, logger)
 
-            # Try to load from cached files
-            raw_dfs = {}
-            raw_dfs["expenses"] = load_from_cache(
-                config.get("raw_expenses_path"), "Loading expenses from cache"
-            )
-            raw_dfs["income"] = load_from_cache(
-                config.get("raw_income_path"), "Loading income from cache"
-            )
-            raw_dfs["savings"] = load_from_cache(
-                config.get("raw_savings_path"), "Loading savings from cache"
-            )
-
-            # Check if we have the essential data
-            if raw_dfs["expenses"] is None or raw_dfs["income"] is None:
-                raise ValueError(
-                    "Could not load essential data from either Numbers file or cache"
-                )
-
-        # Process expenses and income data
-        print("Processing expenses data...")
-        df_expenses = process.process_expense_income_data(
-            raw_dfs["expenses"], "expenses"
+        # Process data
+        df_expenses, df_income, df_savings = process_data(
+            process, raw_dfs, config, logger
         )
-        print(f"Processed {len(df_expenses)} expense records")
-
-        print("Processing income data...")
-        df_income = process.process_expense_income_data(raw_dfs["income"], "income")
-        print(f"Processed {len(df_income)} income records")
-
-        # Save processed data
-        processed_expenses_path = config.get("processed_expenses_path")
-        processed_income_path = config.get("processed_income_path")
-
-        if processed_expenses_path:
-            df_expenses.write_csv(processed_expenses_path)
-            print(f"Saved processed expenses to {processed_expenses_path}")
-
-        if processed_income_path:
-            df_income.write_csv(processed_income_path)
-            print(f"Saved processed income to {processed_income_path}")
-
-        # Process savings data if available
-        df_savings = None
-        if "savings" in raw_dfs and raw_dfs["savings"] is not None:
-            print("Processing savings data...")
-            df_savings = process.process_savings_data(raw_dfs["savings"])
-            print(f"Processed {len(df_savings)} savings records")
-
-            # Save processed savings data
-            processed_savings_path = config.get("processed_savings_path")
-
-            if processed_savings_path:
-                df_savings.write_csv(processed_savings_path)
-                print(f"Saved processed savings to {processed_savings_path}")
-        else:
-            print("No savings data available, checking for cached processed data...")
-            df_savings = load_from_cache(
-                config.get("processed_savings_path"),
-                "Loading processed savings data from cache",
-            )
 
         # Generate all intermediate datasets for visualization
-        print("Generating visualization datasets...")
+        logger.info("Generating visualization datasets...")
         process.generate_all_datasets(df_expenses, df_income, df_savings)
-        print("Visualization datasets generated successfully")
+        logger.info("Visualization datasets generated successfully")
 
         # Initialize and run dashboard
-        print("Initializing dashboard...")
-        dashboard = FinanceDashboard(config)
-        print("Starting dashboard server...")
+        logger.info("Initializing dashboard...")
+        dashboard = FinanceDashboard(config, logger)
+        logger.info("Starting dashboard server...")
         dashboard.run_server(debug=True)
 
     except Exception as e:
         error_traceback = traceback.format_exc()
-        print(f"Critical error in main workflow: {e}")
-        print(error_traceback)
-        log_error(str(e), error_traceback)
-        print("The application has encountered a critical error and cannot continue.")
+        log_error(logger, str(e), error_traceback)
+        logger.critical(
+            "The application has encountered a critical error and cannot continue."
+        )
         return 1
 
     return 0

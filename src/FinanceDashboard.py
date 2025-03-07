@@ -29,14 +29,17 @@ class FinanceDashboard:
         color_theme: Color scheme for the dashboard
     """
 
-    def __init__(self, config):
+    def __init__(self, config, logger):
         """
-        Initialize the FinanceDashboard with configuration.
+        Initialize the FinanceDashboard with configuration and logger.
 
         Args:
             config: Configuration object containing paths to datasets
+            logger: Logger instance from the main application
         """
         self.config = config
+        self.logger = logger.getChild("FinanceDashboard")
+        self.logger.info("FinanceDashboard initialized")
 
         # Get font configuration from config, or use defaults
         fonts = self.config.get(
@@ -179,7 +182,7 @@ class FinanceDashboard:
     # Dashboard Setup Methods
     #
     def _setup_layout(self):
-        """Set up the dashboard layout with the new date range default and consistent styling."""
+        """Set up the dashboard layout with standardized date picker and styling."""
         # Calculate default date range (January 1 of current year to today)
         today = datetime.now()
         end_date = self.max_date
@@ -189,7 +192,7 @@ class FinanceDashboard:
         if start_date < self.min_date:
             start_date = self.min_date
 
-        # Get font configuration from config, or use defaults
+        # Get font configuration from config
         fonts = self.config.get(
             "fonts",
             {
@@ -202,7 +205,7 @@ class FinanceDashboard:
         title_font = fonts.get("title_font", "Montserrat")
         body_font = fonts.get("body_font", "Open Sans")
 
-        # Apply styles directly to components instead of using html.Style
+        # Apply styles directly to components
         body_style = {
             "backgroundColor": self.color_theme["background"],
             "fontFamily": f'"{body_font}", sans-serif',
@@ -213,6 +216,9 @@ class FinanceDashboard:
             "fontWeight": "600",
             "color": self.color_theme.get("headline", "#232323"),
         }
+
+        # Get date picker display format from config
+        date_format = self.config.get("date_display_format", "DD/MM/YYYY")
 
         self.app.layout = dbc.Container(
             [
@@ -231,6 +237,11 @@ class FinanceDashboard:
                                     max_date_allowed=self.max_date,
                                     start_date=start_date,
                                     end_date=end_date,
+                                    display_format=date_format,
+                                    # Only allow entire months selection
+                                    first_day_of_week=1,  # Start week on Monday
+                                    # Only allow selecting dates at month level
+                                    month_format="MMMM YYYY",
                                     style={"backgroundColor": "#ffffff"},
                                 )
                             ],
@@ -920,37 +931,95 @@ class FinanceDashboard:
         Returns:
             go.Figure: Updated figure with consistent styling
         """
+        # Get chart styling parameters from config
+        chart_config = self.config.get("chart_styling", {})
+
+        # Apply consistent styling to the figure
         fig.update_layout(
             title=title,
-            plot_bgcolor=self.color_theme["background"],  # Background color
-            paper_bgcolor=self.color_theme["background"],  # Background color
-            font=dict(color="#232323"),  # Headline color for text
+            plot_bgcolor=self.color_theme["background"],
+            paper_bgcolor=self.color_theme["background"],
+            font=dict(color="#232323"),
             yaxis=dict(
-                titlefont=dict(color="#232323"),  # Headline color
-                tickfont=dict(color="#222525"),  # Paragraph color
-                gridcolor="rgba(35, 35, 35, 0.1)",  # Stroke color with opacity
+                titlefont=dict(color="#232323"),
+                tickfont=dict(color="#222525"),
+                gridcolor="rgba(35, 35, 35, 0.1)",
+                # Format y-axis ticks with euro symbol
+                tickformat="€%{y:,.2f}",
             ),
             xaxis=dict(
-                titlefont=dict(color="#232323"),  # Headline color
-                tickfont=dict(color="#222525"),  # Paragraph color
-                gridcolor="rgba(35, 35, 35, 0.1)",  # Stroke color with opacity
+                titlefont=dict(color="#232323"),
+                tickfont=dict(color="#222525"),
+                gridcolor="rgba(35, 35, 35, 0.1)",
             ),
+            # Standard legend position at bottom
             legend=dict(
-                font=dict(color="#222525"),  # Paragraph color
-                bgcolor="#fffffe",  # Main illustration color
-                bordercolor="#232323",  # Stroke color
+                orientation=chart_config.get("legend_orientation", "h"),
+                yanchor=chart_config.get("legend_yanchor", "bottom"),
+                y=chart_config.get("legend_y", -0.2),
+                xanchor=chart_config.get("legend_xanchor", "center"),
+                x=chart_config.get("legend_x", 0.5),
+                bgcolor=self.color_theme.get("background", "#f8f5f2"),
+                font=dict(color="#222525"),
             ),
-            margin=dict(l=50, r=50, t=60, b=50),
+            margin=dict(
+                l=chart_config.get("margin_left", 50),
+                r=chart_config.get("margin_right", 50),
+                t=chart_config.get("margin_top", 60),
+                b=chart_config.get("margin_bottom", 80),  # Increased for legend
+            ),
+            # Standard hover label formatting
+            hoverlabel=dict(
+                bgcolor=chart_config.get("hover_bgcolor", "white"),
+                font_size=chart_config.get("hover_font_size", 14),
+                font_family=chart_config.get("hover_font_family", "Open Sans"),
+            ),
         )
 
+        # Set hover templates for different types of traces
+        for trace in fig.data:
+            if trace.type == "bar":
+                trace.hovertemplate = "%{x}<br>%{y:,.2f} €<extra></extra>"
+            elif trace.type == "scatter":
+                trace.hovertemplate = "%{x}<br>%{y:,.2f} €<extra></extra>"
+            elif trace.type == "pie":
+                trace.hovertemplate = (
+                    "%{label}<br>%{value:,.2f} € (%{percent})<extra></extra>"
+                )
+
         return fig
+
+    def _parse_date(self, date_string):
+        """
+        Parse date string in multiple formats to handle different possible inputs.
+
+        Args:
+            date_string: String representation of date to parse
+
+        Returns:
+            datetime: Parsed datetime object
+        """
+        if isinstance(date_string, datetime):
+            return date_string
+
+        # Try multiple date formats
+        formats = ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"]
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_string.split(".")[0], fmt)
+            except (ValueError, AttributeError):
+                continue
+
+        # If we get here, none of the formats worked
+        raise ValueError(f"Could not parse date: {date_string}")
 
     #
     # Expense Visualization Methods
     #
-    def _create_expense_overview(self, df_monthly_summary):
+    def _create_expense_category_overview(self, df_monthly_summary):
         """
-        Create an expense overview figure.
+        Create an elegant donut chart for expense categories with improved styling.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
@@ -958,15 +1027,18 @@ class FinanceDashboard:
         Returns:
             go.Figure: Plotly figure for the dashboard
         """
-        if df_monthly_summary is None or len(df_monthly_summary) == 0:
+        if (
+            self.df_expenses_by_category is None
+            or len(self.df_expenses_by_category) == 0
+        ):
             fig = go.Figure()
+            fig = self._update_figure_styling(
+                fig, "Expense Categories - No Data Available"
+            )
             fig.update_layout(
-                title="Monthly Expense Overview - No Data Available",
-                yaxis=dict(title="Amount (€)"),
-                plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
-                        text="No data available for selected period",
+                        text="No expense category data available",
                         showarrow=False,
                         xref="paper",
                         yref="paper",
@@ -977,23 +1049,32 @@ class FinanceDashboard:
             )
             return fig
 
-        # Create a bar chart for expenses
-        fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                x=df_monthly_summary["Month"],
-                y=df_monthly_summary["Expenses"],
-                name="Expenses",
-                marker_color=self.color_theme["expense"],
-            )
+        # Create a donut chart for expense categories
+        labels = self.df_expenses_by_category["Category"].to_list()
+        values = self.df_expenses_by_category["Total"].to_list()
+
+        # Use a custom color palette for the expense categories
+        colors = self.color_theme["categories"][: len(labels)]
+        if len(colors) < len(labels):
+            colors = colors * (len(labels) // len(colors) + 1)
+
+        fig = go.Figure(
+            data=[
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    hole=0.6,  # Set a larger hole for an elegant donut
+                    textinfo="label+percent",
+                    marker=dict(colors=colors),
+                    textposition="outside",
+                    textfont=dict(size=12),
+                    hoverinfo="label+percent+value",
+                    hovertemplate="%{label}: %{value:.2f} € (%{percent})<extra></extra>",
+                )
+            ]
         )
 
-        fig.update_layout(
-            title="Monthly Expense Overview",
-            yaxis=dict(title="Amount (€)"),
-            plot_bgcolor=self.color_theme["background"],
-            hovermode="x",
-        )
+        fig = self._update_figure_styling(fig, "Expense Breakdown by Category")
 
         return fig
 
@@ -1063,7 +1144,7 @@ class FinanceDashboard:
 
     def _create_stacked_expenses(self, df_expenses_stacked):
         """
-        Create a stacked bar chart for expenses by category.
+        Create a stacked bar chart for expenses by category with improved styling.
 
         Args:
             df_expenses_stacked: DataFrame with expenses by month and category
@@ -1073,10 +1154,10 @@ class FinanceDashboard:
         """
         if df_expenses_stacked is None or len(df_expenses_stacked) == 0:
             fig = go.Figure()
+            fig = self._update_figure_styling(
+                fig, "Monthly Expense Breakdown - No Data Available"
+            )
             fig.update_layout(
-                title="Monthly Expense Breakdown - No Data Available",
-                yaxis=dict(title="Amount (€)"),
-                plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
                         text="No data available for selected period",
@@ -1091,32 +1172,41 @@ class FinanceDashboard:
             return fig
 
         unique_categories = df_expenses_stacked["Category"].unique().to_list()
-        colors = self.color_theme["categories"] * (
-            len(unique_categories) // len(self.color_theme["categories"]) + 1
-        )
+        colors = self.color_theme["categories"][: len(unique_categories)]
+        if len(colors) < len(unique_categories):
+            colors = colors * (len(unique_categories) // len(colors) + 1)
 
         fig = go.Figure()
 
+        # Get all months for consistent x-axis
+        all_months = sorted(df_expenses_stacked["Month"].unique().to_list())
+
         for category, color in zip(unique_categories, colors):
             filtered = df_expenses_stacked.filter(pl.col("Category") == category)
+
+            # Create a dict for easy month lookup
+            expenses_by_month = {
+                row["Month"]: row["Expenses"] for row in filtered.rows(named=True)
+            }
+
+            # Create y-values for all months (with 0 for missing months)
+            y_values = [expenses_by_month.get(month, 0) for month in all_months]
+
             fig.add_trace(
                 go.Bar(
-                    x=filtered["Month"].to_list(),
-                    y=filtered["Expenses"].to_list(),
+                    x=all_months,
+                    y=y_values,
                     name=category,
                     marker_color=color,
+                    hovertemplate="%{x}<br>%{y:,.2f} €<extra></extra>",
                 )
             )
 
+        fig = self._update_figure_styling(fig, "Monthly Expense Breakdown")
         fig.update_layout(
-            title="Monthly Expense Breakdown",
             barmode="stack",
             yaxis=dict(title="Amount (€)"),
-            plot_bgcolor=self.color_theme["background"],
-            showlegend=True,
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-            margin=dict(l=50, r=50, t=50, b=50),
-            hovermode="x",
+            hovermode="x unified",
         )
 
         return fig
@@ -1452,7 +1542,10 @@ class FinanceDashboard:
         df_table = df_table.with_columns(
             [
                 pl.col("Date").dt.strftime("%d/%m/%Y").alias("Date"),
-                pl.col("Value").map_elements(lambda x: f"€{x:.2f}").alias("Amount"),
+                # Fix: Specify return_dtype for map_elements
+                pl.col("Value")
+                .map_elements(lambda x: f"€{x:.2f}", return_dtype=pl.Utf8)
+                .alias("Amount"),
             ]
         )
 

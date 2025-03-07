@@ -13,8 +13,6 @@ import polars as pl
 from typing import Dict, Optional, List, Tuple
 from datetime import datetime, timedelta
 
-from src.logger import logger
-
 
 class ExpenseIncomeSchema(pa.DataFrameModel):
     """Schema for standardized expense and income data."""
@@ -52,14 +50,17 @@ class Process:
         config: Configuration object containing mappings and settings
     """
 
-    def __init__(self, config):
+    def __init__(self, config, logger):
         """
-        Initialize the Process class with configuration.
+        Initialize the Process class with configuration and logger.
 
         Args:
             config: Configuration object containing column mappings and settings
+            logger: Logger instance from the main application
         """
         self.config = config
+        self.logger = logger.getChild("Process")
+        self.logger.info("Process initialized")
         self._ensure_output_folder()
 
     def _ensure_output_folder(self):
@@ -161,7 +162,7 @@ class Process:
             df_income: Processed income DataFrame
             df_savings: Processed savings DataFrame
         """
-        logger.info("Generating all datasets for visualization...")
+        self.logger.info("Generating all datasets for visualization...")
 
         # Calculate date range - use all available data
         min_date = min(
@@ -187,7 +188,7 @@ class Process:
                 df_savings, df_savings_monthly, min_date, max_date
             )
 
-        logger.info("All datasets generated successfully")
+        self.logger.info("All datasets generated successfully")
 
     def generate_monthly_summary(self, df_expenses, df_income, start_date, end_date):
         """
@@ -594,21 +595,21 @@ class Process:
             config_key: Key in the configuration for the output path
         """
         if len(df) == 0:
-            logger.warning(f"Empty DataFrame for {config_key}, skipping save")
+            self.logger.warning(f"Empty DataFrame for {config_key}, skipping save")
             return
 
         path = self.config.get(config_key)
         if not path:
-            logger.warning(f"Missing path configuration for {config_key}")
+            self.logger.warning(f"Missing path configuration for {config_key}")
             return
 
         try:
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(path), exist_ok=True)
             df.write_csv(path)
-            logger.info(f"Saved dataset to {path}")
+            self.logger.info(f"Saved dataset to {path}")
         except Exception as e:
-            logger.error(f"Error saving dataset to {path}: {e}")
+            self.logger.error(f"Error saving dataset to {path}: {e}")
 
     def _validate_and_fix_categories(
         self, df: pl.DataFrame, data_type: str
@@ -624,7 +625,7 @@ class Process:
             pl.DataFrame: DataFrame with validated categories
         """
         if "Category" not in df.columns:
-            logger.warning("No Category column found in the DataFrame")
+            self.logger.warning("No Category column found in the DataFrame")
             return df
 
         # Get valid categories from config
@@ -635,7 +636,7 @@ class Process:
         # Check for null categories
         null_count = df.filter(pl.col("Category").is_null()).height
         if null_count > 0:
-            logger.warning(
+            self.logger.warning(
                 f"Found {null_count} records with null categories. Using default category: {default_category}"
             )
 
@@ -648,7 +649,7 @@ class Process:
 
             if len(invalid_categories) > 0:
                 invalid_list = invalid_categories["Category"].to_list()
-                logger.warning(
+                self.logger.warning(
                     f"Found invalid categories: {', '.join(invalid_list)}. Using default category: {default_category}"
                 )
 
