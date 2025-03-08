@@ -1,3 +1,4 @@
+#!src/logger.py
 """
 Logger module for the Finance Dashboard application.
 
@@ -7,46 +8,84 @@ This module provides a standardized logging mechanism for the application.
 import os
 import logging
 from datetime import datetime
-from pathlib import Path
+from typing import Optional
 
 
-def create_logger(name, level=logging.INFO):
+def create_logger(
+    name: str, level: int = logging.INFO, log_dir: str = "logs"
+) -> logging.Logger:
     """
     Create a logger with file handler only (no console output).
 
     Args:
-        name: Name of the logger
-        level: Logging level
+        name (str): Name of the logger.
+        level (int, optional): Logging level. Defaults to logging.INFO.
+        log_dir (str, optional): Directory to store log files. Defaults to "logs".
 
     Returns:
-        logging.Logger: Configured logger
+        logging.Logger: Configured logger instance.
     """
-    # Create logs directory if it doesn't exist
-    os.makedirs("logs", exist_ok=True)
+    # Ensure logs directory exists
+    os.makedirs(log_dir, exist_ok=True)
 
-    # Create logger
+    # Get or create logger
     logger = logging.getLogger(name)
+
+    # Clear any existing handlers to prevent duplicate logging
+    logger.handlers.clear()
+
+    # Set logger level
     logger.setLevel(level)
 
-    # Remove existing handlers if any
-    if logger.handlers:
-        logger.handlers.clear()
-
     # Create formatter
-    file_formatter = logging.Formatter(
+    formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    # Create file handler with timestamp in filename
+    # Generate timestamp for log filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_handler = logging.FileHandler(f"logs/finance_{timestamp}.log")
+
+    # Create file handler
+    log_filename = os.path.join(log_dir, f"{name}_{timestamp}.log")
+    file_handler = logging.FileHandler(log_filename)
     file_handler.setLevel(level)
-    file_handler.setFormatter(file_formatter)
+    file_handler.setFormatter(formatter)
 
     # Add handler to logger
     logger.addHandler(file_handler)
 
-    # Prevent propagation to parent loggers (including root logger)
+    # Prevent log propagation
     logger.propagate = False
 
     return logger
+
+
+def get_logger(name: str, level: Optional[int] = None) -> logging.Logger:
+    """
+    Retrieve an existing logger or create a new one.
+
+    Args:
+        name (str): Name of the logger.
+        level (Optional[int], optional): Logging level. Defaults to None.
+
+    Returns:
+        logging.Logger: Logger instance.
+    """
+    logger = logging.getLogger(name)
+
+    if level is not None:
+        logger.setLevel(level)
+
+    return logger
+
+
+if __name__ == "__main__":
+    # Example usage demonstrating logger creation and logging
+    example_logger = create_logger("example_logger")
+    example_logger.info("This is an informational log message")
+    example_logger.warning("This is a warning message")
+    example_logger.error("This is an error message")
+
+    # Demonstrate getting an existing logger
+    retrieved_logger = get_logger("example_logger")
+    retrieved_logger.info("Logging from retrieved logger")
