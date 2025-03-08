@@ -6,19 +6,19 @@ This module contains unit tests for the logger module to ensure
 it correctly creates and configures loggers.
 """
 
+import logging
 import os
 import sys
-import logging
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Add the project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 # Import the module under test
-from src.logger import (  # pylint: disable=wrong-import-position,import-error
+from src.logger import (  # noqa: E402  pylint: disable=wrong-import-position
     create_logger,
 )
 
@@ -26,7 +26,7 @@ from src.logger import (  # pylint: disable=wrong-import-position,import-error
 class TestLogger(unittest.TestCase):
     """Test suite for the logger module."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up test fixtures."""
         # Create a temporary directory for log files
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -36,7 +36,7 @@ class TestLogger(unittest.TestCase):
         self.makedirs_patcher = patch("os.makedirs")
         self.mock_makedirs = self.makedirs_patcher.start()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         """Tear down test fixtures."""
         # Stop all patches
         self.makedirs_patcher.stop()
@@ -50,7 +50,7 @@ class TestLogger(unittest.TestCase):
         logging.shutdown()
 
     @patch("logging.FileHandler")
-    def test_logger_creation(self, mock_file_handler):
+    def test_logger_creation(self, mock_file_handler: MagicMock) -> None:
         """Test that a logger is created with the correct name and level."""
         # Set up the mock
         mock_file_handler.return_value = MagicMock()
@@ -78,7 +78,7 @@ class TestLogger(unittest.TestCase):
         self.assertFalse(created_logger.propagate)
 
     @patch("logging.FileHandler")
-    def test_logger_custom_level(self, mock_file_handler):
+    def test_logger_custom_level(self, mock_file_handler: MagicMock) -> None:
         """Test that the logger can be created with a custom level."""
         # Set up the mock
         mock_file_handler.return_value = MagicMock()
@@ -94,8 +94,9 @@ class TestLogger(unittest.TestCase):
 
     @patch("src.logger.datetime")
     @patch("logging.FileHandler")
-    @staticmethod
-    def test_timestamp_in_filename(mock_file_handler, mock_datetime):
+    def test_timestamp_in_filename(
+        self, mock_file_handler: MagicMock, mock_datetime: MagicMock
+    ) -> None:
         """Test that the timestamp is included in the log filename."""
         # Set up the mock datetime
         mock_datetime_instance = MagicMock()
@@ -113,7 +114,7 @@ class TestLogger(unittest.TestCase):
             os.path.join("logs", "test_logger_20230101_120000.log")
         )
 
-    def test_handler_formatter(self):
+    def test_handler_formatter(self) -> None:
         """Test that the handler has the correct formatter."""
         # Create a real logger but with a mock handler
         with patch("logging.FileHandler", autospec=True) as mock_file_handler:
@@ -134,7 +135,7 @@ class TestLogger(unittest.TestCase):
                 formatter._fmt, expected_format  # pylint: disable=protected-access
             )
 
-    def test_existing_handlers_cleared(self):
+    def test_existing_handlers_cleared(self) -> None:
         """Test that existing handlers are cleared when creating a logger."""
         # Create a logger and add a handler to it
         logger_name = "test_logger"
@@ -158,7 +159,7 @@ class TestLogger(unittest.TestCase):
             # Assert that only one new handler was added
             self.assertEqual(len(updated_logger.handlers), 1)
 
-    def test_real_logging(self):
+    def test_real_logging(self) -> None:
         """Test that logs are actually written to a file."""
         # Create a temporary directory for logs
         with tempfile.TemporaryDirectory() as temp_logs_dir:
