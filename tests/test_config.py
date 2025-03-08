@@ -46,8 +46,8 @@ class TestConfig(unittest.TestCase):
 
         # Create a temporary file with the sample configuration
         self.temp_dir = (
-            tempfile.TemporaryDirectory()
-        )  # pylint: disable=consider-using-with
+            tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        )
         self.config_path = os.path.join(self.temp_dir.name, "test_config.yaml")
 
         with open(self.config_path, "w", encoding="utf-8") as config_file:
