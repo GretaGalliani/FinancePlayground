@@ -22,15 +22,17 @@ repos:
     -   id: isort
         args: [--profile=black]
 
--   repo: https://github.com/pycqa/pylint
-    rev: v3.0.3
+-   repo: local
     hooks:
     -   id: pylint
+        name: pylint
+        entry: pylint
+        language: system
+        types: [python]
         args: [
             "--disable=C0111,R0903,C0103",
             "--max-line-length=88"
         ]
-        additional_dependencies: [pylint-django]
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0
