@@ -7,11 +7,12 @@ generates all intermediate datasets required for visualization.
 """
 
 import os
-import pandera.polars as pa
-from pandera.typing.polars import DataFrame
-import polars as pl
-from typing import Dict, Optional, List, Tuple
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+
+import pandera.polars as pa
+import polars as pl
+from pandera.typing.polars import DataFrame
 
 
 class ExpenseIncomeSchema(pa.DataFrameModel):
@@ -65,7 +66,7 @@ class Process:
 
     def _ensure_output_folder(self):
         """Create the output folder if it doesn't exist."""
-        output_folder = self.config.get("output_folder", "output")
+        output_folder = self.config.get("output_folder")
         os.makedirs(output_folder, exist_ok=True)
 
     @pa.check_types
@@ -87,7 +88,7 @@ class Process:
             df = df.drop("Mese")
 
         # Get the appropriate column mapping
-        column_mapping = self.config.get(f"{data_type}_column_mapping", {})
+        column_mapping = self.config.get(f"{data_type}_column_mapping")
 
         if not column_mapping:
             raise ValueError(f"Missing column mapping for {data_type}")
@@ -128,7 +129,7 @@ class Process:
             df = df.drop("Mese")
 
         # Get column mapping from config
-        column_mapping = self.config.get("savings_column_mapping", {})
+        column_mapping = self.config.get("savings_column_mapping")
 
         if not column_mapping:
             raise ValueError("Missing savings column mapping in configuration")
@@ -630,8 +631,8 @@ class Process:
 
         # Get valid categories from config
         valid_categories_key = f"valid_{data_type}_categories"
-        valid_categories = self.config.get(valid_categories_key, [])
-        default_category = self.config.get("default_category", "Miscellaneous")
+        valid_categories = self.config.get(valid_categories_key)
+        default_category = self.config.get("default_category")
 
         # Check for null categories
         null_count = df.filter(pl.col("Category").is_null()).height

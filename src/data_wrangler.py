@@ -7,113 +7,57 @@ Apple Numbers files, converting them to structured Polars DataFrames and saving
 the results to CSV files for further processing.
 """
 
+import json
+import logging
 import os
 import warnings
-import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Set, Tuple
-from dataclasses import dataclass, field
-import json
-from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-import polars as pl
-from numbers_parser import Document
-from pathlib import Path
+import polars as pl  # type: ignore
+from numbers_parser import Document  # type: ignore
 
-
-@dataclass
-class SkippedRow:
-    """Class to store information about skipped rows."""
-
-    sheet_name: str
-    row_index: int  # Original index in the sheet
-    row_data: List[Any]
-    reason: str
+from config import Config
+from models import ProcessingResult, SkippedRow
 
 
-class DataWrangler:
+class NumbersDocumentReader:
     """
-    A class for loading and processing financial data from Numbers files.
+    Handles opening and reading Numbers documents.
 
-    This class handles extracting data from Apple Numbers spreadsheets and converting
-    it to Polars DataFrames. It supports multiple sheet types (expenses, income, savings)
-    and applies initial data cleaning and validation.
-
-    Attributes:
-        config: Configuration object containing paths and mappings
-        logger: Logger instance for this class
-        skipped_rows: List of rows that were skipped during processing
+    This class encapsulates the logic for safely opening Numbers files
+    and extracting available sheets.
     """
 
-    def __init__(self, config: Dict[str, Any], logger: logging.Logger):
+    def __init__(self, logger: logging.Logger):
         """
-        Initialize the DataWrangler with configuration and logger.
+        Initialize the reader with a logger.
 
         Args:
-            config: Configuration object containing paths and mappings
-            logger: Logger instance from the main application
+            logger: Logger instance
         """
-        self.config = config
-        self.logger = logger.getChild("DataWrangler")
-        self.skipped_rows: List[SkippedRow] = []
+        self.logger = logger.getChild("NumbersDocumentReader")
 
-        # Set up log directory
-        os.makedirs("logs", exist_ok=True)
-        self.logger.info("DataWrangler initialized")
-
-    def load_updated_file(self) -> Dict[str, pl.DataFrame]:
-        """
-        Load and process all sheets from the Numbers file.
-
-        Returns:
-            Dict[str, pl.DataFrame]: Dictionary of DataFrames for expenses, income, and savings
-
-        Raises:
-            FileNotFoundError: If the Numbers file doesn't exist
-            ValueError: If no valid sheets are found or if data processing fails
-
-        Note:
-            Any rows that are skipped during processing will be stored in the
-            `skipped_rows` attribute and can be saved using `save_skipped_rows_report`.
-        """
-        self.logger.info("Starting to load Numbers file")
-
-        # Get Numbers file path from config
-        numbers_path = self._get_config_value("numbers_file_path")
-
-        # Validate file exists
-        if not os.path.exists(numbers_path):
-            self.logger.error(f"Numbers file not found at: {numbers_path}")
-            raise FileNotFoundError(f"Numbers file not found at: {numbers_path}")
-
-        # Process the document
-        doc = self._open_document(numbers_path)
-        sheet_mappings = self._get_config_value("sheet_mappings")
-
-        # Extract data frames from document sheets
-        dfs = self._extract_dataframes(doc, sheet_mappings)
-
-        if not dfs:
-            self.logger.error("No valid sheets found in the document")
-            raise ValueError("No valid sheets found in the document")
-
-        self.logger.info("Completed loading all sheets successfully")
-        return dfs
-
-    def _open_document(self, numbers_path: str) -> Document:
+    def open_document(self, file_path: str) -> Document:
         """
         Open a Numbers document with warning suppression.
 
         Args:
-            numbers_path: Path to the Numbers file
+            file_path: Path to the Numbers file
 
         Returns:
             Document: The opened Numbers document
 
         Raises:
-            Exception: If document cannot be opened
+            FileNotFoundError: If the file doesn't exist
+            ValueError: If no sheets are found in the document
+            Exception: For other document opening errors
         """
-        self.logger.info(f"Loading Numbers file from: {numbers_path}")
+        self.logger.info(f"Loading Numbers file from: {file_path}")
+
+        if not os.path.exists(file_path):
+            self.logger.error(f"Numbers file not found at: {file_path}")
+            raise FileNotFoundError(f"Numbers file not found at: {file_path}")
 
         # Suppress the specific RuntimeWarning about Numbers version
         with warnings.catch_warnings():
@@ -123,7 +67,7 @@ class DataWrangler:
 
             try:
                 # Open the Numbers document
-                doc = Document(numbers_path)
+                doc = Document(file_path)
 
                 # Validate document has sheets
                 if not doc.sheets:
@@ -139,63 +83,29 @@ class DataWrangler:
                 self.logger.exception(f"Error opening Numbers file: {str(e)}")
                 raise
 
-    def _extract_dataframes(
-        self, doc: Document, sheet_mappings: Dict[str, str]
-    ) -> Dict[str, pl.DataFrame]:
+
+class DataFrameProcessor:
+    """
+    Handles processing and cleaning of DataFrames.
+
+    This class is responsible for validating and cleaning data
+    after it has been extracted from a Numbers document.
+    """
+
+    def __init__(self, config: Config, logger: logging.Logger):
         """
-        Extract DataFrames from document sheets.
+        Initialize the processor with configuration and logger.
 
         Args:
-            doc: Numbers document
-            sheet_mappings: Mapping of sheet names to standardized names
-
-        Returns:
-            Dict[str, pl.DataFrame]: Dictionary of processed DataFrames
+            config: Application configuration
+            logger: Logger instance
         """
-        dfs = {}
+        self.config = config
+        self.logger = logger.getChild("DataFrameProcessor")
 
-        for sheet in doc.sheets:
-            sheet_name_lower = sheet.name.lower()
-
-            # Check if this sheet should be processed
-            if sheet_name_lower not in sheet_mappings:
-                self.logger.debug(f"Skipping sheet: {sheet.name} (not a target sheet)")
-                continue
-
-            # Get the standardized English name for this sheet
-            english_name = sheet_mappings[sheet_name_lower]
-            self.logger.info(f"Processing sheet: {sheet.name} as {english_name}")
-
-            # Skip sheets without tables
-            tables = sheet.tables
-            if not tables:
-                self.logger.warning(
-                    f"No tables found in {sheet.name} sheet, skipping..."
-                )
-                continue
-
-            # Get rows from the first table
-            raw_data = tables[0].rows(values_only=True)
-
-            # Process the data and create DataFrame
-            df = self._process_sheet_data(raw_data, sheet.name)
-
-            # Apply sheet-specific transformations
-            df = self._apply_sheet_transformations(df, english_name)
-
-            # Store DataFrame with standardized name
-            dfs[english_name] = df
-
-            # Save to CSV if path is configured
-            self._save_df_to_csv(df, english_name)
-
-            self.logger.info(f"Successfully processed {len(df)} rows from {sheet.name}")
-
-        return dfs
-
-    def _process_sheet_data(
+    def process_sheet_data(
         self, data: List[List[Any]], sheet_name: str
-    ) -> pl.DataFrame:
+    ) -> Tuple[pl.DataFrame, List[SkippedRow]]:
         """
         Process data from a sheet and create a DataFrame.
 
@@ -204,7 +114,9 @@ class DataWrangler:
             sheet_name: Name of the sheet being processed
 
         Returns:
-            pl.DataFrame: Processed data as a Polars DataFrame
+            Tuple containing:
+                - pl.DataFrame: Processed data as a Polars DataFrame
+                - List[SkippedRow]: Rows that were skipped during processing
 
         Raises:
             ValueError: If no data is found or if column headers are invalid
@@ -225,22 +137,12 @@ class DataWrangler:
             raise ValueError(f"No data rows found in {sheet_name} sheet")
 
         # Process rows to ensure they're valid
-        valid_rows = self._get_valid_rows(rows, columns, sheet_name)
+        valid_rows, skipped_rows = self._get_valid_rows(rows, columns, sheet_name)
 
         # Create Polars DataFrame with validated data
         try:
-            # Handle datetime conversion issues by converting all values to strings first
-            # We'll parse specific columns to proper types after creating the DataFrame
-            sanitized_rows = []
-            for row in valid_rows:
-                sanitized_row = []
-                for value in row:
-                    # Convert datetime objects to strings to avoid type inference issues
-                    if isinstance(value, datetime):
-                        sanitized_row.append(value.strftime("%Y-%m-%d"))
-                    else:
-                        sanitized_row.append(value)
-                sanitized_rows.append(sanitized_row)
+            # Sanitize rows for DataFrame creation
+            sanitized_rows = self._sanitize_rows(valid_rows)
 
             # Create DataFrame with strings to avoid type inference issues
             df = pl.DataFrame(data=sanitized_rows, schema=columns)
@@ -251,13 +153,15 @@ class DataWrangler:
             self.logger.info(
                 f"Created DataFrame with {len(df)} rows and {len(df.columns)} columns"
             )
-            return df
+            return df, skipped_rows
 
         except Exception as e:
             self.logger.exception(
                 f"Error creating DataFrame for {sheet_name}: {str(e)}"
             )
-            raise ValueError(f"Error creating DataFrame for {sheet_name}: {str(e)}")
+            raise ValueError(
+                f"Error creating DataFrame for {sheet_name}: {str(e)}"
+            ) from e
 
     def _validate_columns(self, columns: List[Any], sheet_name: str) -> List[str]:
         """
@@ -280,17 +184,15 @@ class DataWrangler:
             raise ValueError(f"Invalid or missing column headers in {sheet_name} sheet")
 
         # Convert None values in column headers to empty strings
-        columns = [col if col is not None else "" for col in columns]
+        columns = [str(col) if col is not None else "" for col in columns]
 
-        self.logger.info(
-            f"Found columns in {sheet_name}: {', '.join(str(col) for col in columns)}"
-        )
+        self.logger.info(f"Found columns in {sheet_name}: {', '.join(columns)}")
 
         return columns
 
     def _get_valid_rows(
         self, rows: List[List[Any]], columns: List[str], sheet_name: str
-    ) -> List[List[Any]]:
+    ) -> Tuple[List[List[Any]], List[SkippedRow]]:
         """
         Filter and normalize data rows.
 
@@ -300,25 +202,22 @@ class DataWrangler:
             sheet_name: Name of the sheet
 
         Returns:
-            List[List[Any]]: Validated rows
+            Tuple containing:
+                - List[List[Any]]: Validated rows
+                - List[SkippedRow]: Rows that were skipped
         """
         valid_rows = []
-        skipped_count = 0
+        skipped_rows = []
 
         # Check for date column index
-        date_column_candidates = ["Data", "Date", "Datum"]
-        date_column_idx = None
-        for candidate in date_column_candidates:
-            if candidate in columns:
-                date_column_idx = columns.index(candidate)
-                break
+        date_column_idx = self._find_date_column_index(columns)
 
         for i, row in enumerate(rows):
             # Ignore completely empty rows
             if row is None or all(cell is None or cell == "" for cell in row):
                 continue
 
-            original_row = row.copy() if row else None
+            original_row = row.copy() if row else []  # Ensure it's never None
 
             # Skip rows with null date values if date column was identified
             if date_column_idx is not None and (
@@ -337,8 +236,9 @@ class DataWrangler:
 
             # Check if row has too many None values
             none_count = sum(1 for cell in row if cell is None or cell == "")
-            if none_count > len(columns) // 2:  # Skip if more than half are None/empty
-                self.skipped_rows.append(
+            # Skip if more than half are None/empty
+            if none_count > len(columns) // 2:
+                skipped_rows.append(
                     SkippedRow(
                         sheet_name=sheet_name,
                         row_index=i + 2,  # +2 for 1-based indexing and header row
@@ -346,13 +246,9 @@ class DataWrangler:
                         reason=f"Too many empty values ({none_count}/{len(columns)} fields are empty)",
                     )
                 )
-                skipped_count += 1
                 continue
 
             valid_rows.append(row)
-
-        if skipped_count > 0:
-            self.logger.warning(f"Skipped {skipped_count} invalid rows in {sheet_name}")
 
         if not valid_rows:
             self.logger.error(
@@ -362,79 +258,44 @@ class DataWrangler:
                 f"No valid data rows after filtering in {sheet_name} sheet"
             )
 
-        return valid_rows
+        return valid_rows, skipped_rows
 
-    def _apply_sheet_transformations(
-        self, df: pl.DataFrame, sheet_type: str
-    ) -> pl.DataFrame:
+    def _find_date_column_index(self, columns: List[str]) -> Optional[int]:
         """
-        Apply sheet-specific transformations.
+        Find the index of the date column in the header row.
 
         Args:
-            df: DataFrame to transform
-            sheet_type: Type of sheet (income, expenses, savings)
+            columns: Column headers
 
         Returns:
-            pl.DataFrame: Transformed DataFrame
+            Optional[int]: Index of date column if found, None otherwise
         """
-        # Special handling for income data
-        if sheet_type == "income":
-            # Filter out excluded categories
-            categories_column = self._get_category_column_name(df)
-            if categories_column and categories_column in df.columns:
-                excluded_categories = self._get_config_value(
-                    "excluded_income_categories", ["Welfare"]
-                )
-                df = df.filter(~pl.col(categories_column).is_in(excluded_categories))
-                self.logger.info(
-                    f"Filtered out excluded income categories: {excluded_categories}"
-                )
-
-        return df
-
-    def _save_df_to_csv(self, df: pl.DataFrame, english_name: str) -> None:
-        """
-        Save DataFrame to CSV if path is configured.
-
-        Args:
-            df: DataFrame to save
-            english_name: Standardized name of the sheet
-        """
-        raw_path_key = f"raw_{english_name}_path"
-        raw_path = self._get_config_value(raw_path_key, required=False)
-
-        if raw_path:
-            self._save_to_csv(df, raw_path)
-            self.logger.info(f"Saved {english_name} data to: {raw_path}")
-        else:
-            self.logger.warning(f"No path configured for {raw_path_key}")
-
-    def _get_category_column_name(self, df: pl.DataFrame) -> Optional[str]:
-        """
-        Get the name of the category column in a DataFrame.
-
-        Args:
-            df: DataFrame to search
-
-        Returns:
-            Optional[str]: Name of the category column if found, None otherwise
-        """
-        # First check for the standard English name
-        if "Category" in df.columns:
-            return "Category"
-
-        # Then check for the Italian name
-        if "Categoria" in df.columns:
-            return "Categoria"
-
-        # Try to infer from column mapping
-        income_mapping = self._get_config_value("income_column_mapping", {})
-        for italian_name, english_name in income_mapping.items():
-            if english_name == "Category" and italian_name in df.columns:
-                return italian_name
-
-        self.logger.warning("Could not determine category column name")
+        date_column_candidate = self.config.get("numbers_date_column")
+        if date_column_candidate in columns:
+            return columns.index(date_column_candidate)
         return None
+
+    def _sanitize_rows(self, rows: List[List[Any]]) -> List[List[Any]]:
+        """
+        Sanitize row values for DataFrame creation.
+
+        Args:
+            rows: Raw data rows
+
+        Returns:
+            List[List[Any]]: Sanitized rows
+        """
+        sanitized_rows = []
+        for row in rows:
+            sanitized_row = []
+            for value in row:
+                # Convert datetime objects to strings to avoid type inference issues
+                if isinstance(value, datetime):
+                    sanitized_row.append(value.strftime("%Y-%m-%d"))
+                else:
+                    sanitized_row.append(value)
+            sanitized_rows.append(sanitized_row)
+        return sanitized_rows
 
     def _clean_dataframe(self, df: pl.DataFrame, sheet_name: str) -> pl.DataFrame:
         """
@@ -452,27 +313,11 @@ class DataWrangler:
         # Find the standard name for this sheet
         sheet_type = self._get_sheet_type(sheet_name)
 
-        # Handle date columns (often causing issues in the 'Risparmi' sheet)
-        date_column_candidates = ["Data", "Date", "Datum"]
-
         # First, replace empty strings with None in all columns to standardize missing values
         df = self._replace_empty_strings(df)
 
-        for col in df.columns:
-            if col in date_column_candidates:
-                try:
-                    # Try to convert to date format (any remaining rows with null dates
-                    # should have been filtered out in _get_valid_rows)
-                    self.logger.debug(f"Converting column {col} to date format")
-                    df = df.with_columns(
-                        pl.col(col)
-                        .str.strptime(pl.Date, "%Y-%m-%d", strict=False)
-                        .alias(col)
-                    )
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to convert column {col} to date: {str(e)}"
-                    )
+        # Process date columns
+        df = self._process_date_columns(df)
 
         # Process monetary values if found
         df = self._clean_monetary_columns(df, sheet_type)
@@ -493,7 +338,7 @@ class DataWrangler:
         Returns:
             Optional[str]: Standard sheet type if found, None otherwise
         """
-        sheet_mappings = self._get_config_value("sheet_mappings", {})
+        sheet_mappings = self.config.get("numbers_sheet_mappings")
 
         for italian_name, english_name in sheet_mappings.items():
             if italian_name.lower() in sheet_name.lower():
@@ -501,6 +346,35 @@ class DataWrangler:
 
         self.logger.warning(f"Could not determine sheet type for {sheet_name}")
         return None
+
+    def _process_date_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Process date columns in the DataFrame.
+
+        Args:
+            df: DataFrame to process
+
+        Returns:
+            pl.DataFrame: DataFrame with processed date columns
+        """
+        date_column_candidates = self.config.get("date_column_candidates")
+
+        for col in df.columns:
+            if col in date_column_candidates:
+                try:
+                    # Try to convert to date format
+                    self.logger.debug(f"Converting column {col} to date format")
+                    df = df.with_columns(
+                        pl.col(col)
+                        .str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+                        .alias(col)
+                    )
+                except Exception as e:
+                    self.logger.warning(
+                        f"Failed to convert column {col} to date: {str(e)}"
+                    )
+
+        return df
 
     def _clean_monetary_columns(
         self, df: pl.DataFrame, sheet_type: Optional[str]
@@ -574,8 +448,6 @@ class DataWrangler:
         Returns:
             pl.DataFrame: DataFrame with empty rows dropped
         """
-        # Note: Empty rows should already be filtered out in _get_valid_rows
-        # This is just an additional safeguard
         string_cols = [col for col in df.columns if df[col].dtype == pl.Utf8]
         if string_cols:
             rows_before = len(df)
@@ -594,13 +466,73 @@ class DataWrangler:
 
         return df
 
-    def _save_to_csv(self, df: pl.DataFrame, path: str) -> None:
+    def apply_sheet_transformations(
+        self, df: pl.DataFrame, sheet_type: str
+    ) -> pl.DataFrame:
+        """
+        Apply sheet-specific transformations.
+
+        Args:
+            df: DataFrame to transform
+            sheet_type: Type of sheet (income, expenses, savings)
+
+        Returns:
+            pl.DataFrame: Transformed DataFrame
+        """
+        # Apply specific transformations based on sheet type
+        if sheet_type == "income":
+            # Get the category column name
+            self._get_category_column_name(df)
+            # The transformation logic should be implemented as needed
+
+        return df
+
+    def _get_category_column_name(self, df: pl.DataFrame) -> Optional[str]:
+        """
+        Get the name of the category column in a DataFrame.
+
+        Args:
+            df: DataFrame to search
+
+        Returns:
+            Optional[str]: Name of the category column if found, None otherwise
+        """
+        # First check for the standard English name
+        if "Category" in df.columns:
+            return "Category"
+
+        # Then check for the Italian name
+        if "Categoria" in df.columns:
+            return "Categoria"
+
+        self.logger.warning("Could not determine category column name")
+        return None
+
+
+class FileHandler:
+    """
+    Handles file operations like saving DataFrames to CSV.
+    """
+
+    def __init__(self, logger: logging.Logger):
+        """
+        Initialize the file handler with a logger.
+
+        Args:
+            logger: Logger instance
+        """
+        self.logger = logger.getChild("FileHandler")
+
+    def save_to_csv(self, df: pl.DataFrame, path: str) -> None:
         """
         Save a DataFrame to CSV, creating directories as needed.
 
         Args:
             df: DataFrame to save
             path: Path to save the CSV file
+
+        Raises:
+            IOError: If saving fails
         """
         try:
             # Create directory if it doesn't exist
@@ -622,46 +554,25 @@ class DataWrangler:
 
         except Exception as e:
             self.logger.error(f"Error saving DataFrame to {path}: {str(e)}")
-            raise IOError(f"Error saving DataFrame to {path}: {str(e)}")
+            raise IOError(f"Error saving DataFrame to {path}: {str(e)}") from e
 
-    def _get_config_value(
-        self, key: str, default: Any = None, required: bool = True
-    ) -> Any:
-        """
-        Get a value from the configuration.
-
-        Args:
-            key: Configuration key
-            default: Default value if key is not found
-            required: Whether the key is required
-
-        Returns:
-            Any: Value from configuration or default
-
-        Raises:
-            ValueError: If key is required but not found
-        """
-        value = self.config.get(key, default)
-        if required and value is None:
-            self.logger.error(f"Missing {key} in configuration")
-            raise ValueError(f"Missing {key} in configuration")
-        return value
-
-    def save_skipped_rows_report(self, output_path: Optional[str] = None) -> str:
+    def save_skipped_rows_report(
+        self, skipped_rows: List[SkippedRow], output_path: Optional[str] = None
+    ) -> str:
         """
         Save a report of skipped rows to help fix data issues.
 
         Args:
+            skipped_rows: List of skipped rows to report
             output_path: Path to save the report. If None, a default path will be used.
 
         Returns:
             str: Path where the report was saved
 
-        Note:
-            The report is saved in JSON format and contains detailed information
-            about each skipped row, including the sheet name, row index, and reason.
+        Raises:
+            IOError: If saving fails
         """
-        if not self.skipped_rows:
+        if not skipped_rows:
             self.logger.info("No skipped rows to report")
             return ""
 
@@ -677,7 +588,7 @@ class DataWrangler:
 
         # Convert skipped rows to serializable format
         skipped_data = []
-        for row in self.skipped_rows:
+        for row in skipped_rows:
             # Convert any non-serializable objects to strings
             serializable_row_data = []
             for cell in row.row_data:
@@ -698,14 +609,13 @@ class DataWrangler:
         # Group by sheet for easier analysis
         report = {
             "summary": {
-                "total_skipped_rows": len(self.skipped_rows),
-                "sheets_with_issues": len(
-                    set(row.sheet_name for row in self.skipped_rows)
-                ),
+                "total_skipped_rows": len(skipped_rows),
+                "sheets_with_issues": len(set(row.sheet_name for row in skipped_rows)),
             },
             "skipped_rows_by_sheet": {},
         }
 
+        # Initialize the sheet-based collections
         for row in skipped_data:
             sheet_name = row["sheet_name"]
             if sheet_name not in report["skipped_rows_by_sheet"]:
@@ -720,50 +630,164 @@ class DataWrangler:
             return output_path
         except Exception as e:
             self.logger.error(f"Error saving skipped rows report: {str(e)}")
-            raise IOError(f"Error saving skipped rows report: {str(e)}")
+            raise IOError(f"Error saving skipped rows report: {str(e)}") from e
 
 
-if __name__ == "__main__":
-    # Example usage
-    import logging
+class DataWrangler:
+    """
+    Main class for loading and processing financial data from Numbers files.
 
-    # Create a basic configuration
-    sample_config = {
-        "numbers_file_path": "path/to/finances.numbers",
-        "sheet_mappings": {
-            "spese": "expenses",
-            "entrate": "income",
-            "risparmi": "savings",
-        },
-        "excluded_income_categories": ["Welfare"],
-        "raw_expenses_path": "data/raw/expenses.csv",
-        "raw_income_path": "data/raw/income.csv",
-        "raw_savings_path": "data/raw/savings.csv",
-    }
+    This class coordinates the extraction, processing, and saving of data
+    from Apple Numbers spreadsheets.
+    """
 
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("FinanceApp")
+    def __init__(self, config: Config, logger: logging.Logger):
+        """
+        Initialize the DataWrangler with configuration and logger.
 
-    # Create DataWrangler instance
-    wrangler = DataWrangler(sample_config, logger)
+        Args:
+            config: Configuration object
+            logger: Logger instance from the main application
+        """
+        self.config = config
+        self.logger = logger.getChild("DataWrangler")
 
-    try:
-        # Load data from Numbers file
-        dataframes = wrangler.load_updated_file()
+        # Create helper objects
+        self.document_reader = NumbersDocumentReader(logger)
+        self.df_processor = DataFrameProcessor(config, logger)
+        self.file_handler = FileHandler(logger)
 
-        # Print summary of loaded data
-        for sheet_name, df in dataframes.items():
-            print(
-                f"Loaded {sheet_name} data with {len(df)} rows and {len(df.columns)} columns"
+        # Set up log directory
+        os.makedirs("logs", exist_ok=True)
+        self.logger.info("DataWrangler initialized")
+
+    def load_updated_file(self) -> ProcessingResult:
+        """
+        Load and process all sheets from the Numbers file.
+
+        Returns:
+            ProcessingResult: Object containing DataFrames and skipped rows
+
+        Raises:
+            FileNotFoundError: If the Numbers file doesn't exist
+            ValueError: If no valid sheets are found or if data processing fails
+        """
+        self.logger.info("Starting to load Numbers file")
+
+        # Get Numbers file path from config
+        numbers_path = self.config.get("numbers_file_path")
+
+        # Process the document
+        doc = self.document_reader.open_document(numbers_path)
+        sheet_mappings = self.config.get("numbers_sheet_mappings")
+
+        # Extract data frames from document sheets
+        dfs, all_skipped_rows = self._extract_dataframes(doc, sheet_mappings)
+
+        if not dfs:
+            self.logger.error("No valid sheets found in the document")
+            raise ValueError("No valid sheets found in the document")
+
+        self.logger.info("Completed loading all sheets successfully")
+        return ProcessingResult(dataframes=dfs, skipped_rows=all_skipped_rows)
+
+    def _extract_dataframes(
+        self, doc: Document, sheet_mappings: Dict[str, str]
+    ) -> Tuple[Dict[str, pl.DataFrame], List[SkippedRow]]:
+        """
+        Extract DataFrames from document sheets.
+
+        Args:
+            doc: Numbers document
+            sheet_mappings: Mapping of sheet names to standardized names
+
+        Returns:
+            Tuple containing:
+                - Dict[str, pl.DataFrame]: Dictionary of processed DataFrames
+                - List[SkippedRow]: All skipped rows
+        """
+        dfs = {}
+        all_skipped_rows = []
+
+        for sheet in doc.sheets:
+            sheet_name_lower = sheet.name.lower()
+
+            # Check if this sheet should be processed
+            if not any(name.lower() == sheet_name_lower for name in sheet_mappings):
+                self.logger.debug(f"Skipping sheet: {sheet.name} (not a target sheet)")
+                continue
+
+            # Find the matching key in sheet_mappings
+            matching_key = next(
+                (key for key in sheet_mappings if key.lower() in sheet_name_lower), None
             )
 
-        # Save report of skipped rows for later analysis
-        if wrangler.skipped_rows:
-            report_path = wrangler.save_skipped_rows_report()
-            print(
-                f"Saved report of {len(wrangler.skipped_rows)} skipped rows to {report_path}"
-            )
+            if not matching_key:
+                continue
 
-    except Exception as e:
-        logger.error(f"Error processing data: {str(e)}")
+            # Get the standardized English name for this sheet
+            english_name = sheet_mappings[matching_key]
+            self.logger.info(f"Processing sheet: {sheet.name} as {english_name}")
+
+            # Skip sheets without tables
+            tables = sheet.tables
+            if not tables:
+                self.logger.warning(
+                    f"No tables found in {sheet.name} sheet, skipping..."
+                )
+                continue
+
+            # Get rows from the first table
+            raw_data = tables[0].rows(values_only=True)
+
+            # Process the data and create DataFrame
+            df, skipped_rows = self.df_processor.process_sheet_data(
+                raw_data, sheet.name
+            )
+            all_skipped_rows.extend(skipped_rows)
+
+            # Apply sheet-specific transformations
+            df = self.df_processor.apply_sheet_transformations(df, english_name)
+
+            # Store DataFrame with standardized name
+            dfs[english_name] = df
+
+            # Save to CSV if path is configured
+            self._save_df_to_csv(df, english_name)
+
+            self.logger.info(f"Successfully processed {len(df)} rows from {sheet.name}")
+
+        return dfs, all_skipped_rows
+
+    def _save_df_to_csv(self, df: pl.DataFrame, english_name: str) -> None:
+        """
+        Save DataFrame to CSV if path is configured.
+
+        Args:
+            df: DataFrame to save
+            english_name: Standardized name of the sheet
+        """
+        csv_paths = self.config.get("raw_paths")
+
+        path = csv_paths.get(english_name)
+
+        if path:
+            self.file_handler.save_to_csv(df, path)
+            self.logger.info(f"Saved {english_name} data to: {path}")
+        else:
+            self.logger.warning(f"No path configured for {english_name}")
+
+    def save_skipped_rows_report(
+        self, skipped_rows: List[SkippedRow], output_path: Optional[str] = None
+    ) -> str:
+        """
+        Save a report of skipped rows to help fix data issues.
+
+        Args:
+            skipped_rows: List of skipped rows to report
+            output_path: Path to save the report. If None, a default path will be used.
+
+        Returns:
+            str: Path where the report was saved
+        """
+        return self.file_handler.save_skipped_rows_report(skipped_rows, output_path)

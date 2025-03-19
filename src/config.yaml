@@ -1,12 +1,24 @@
 ###############
-# INPUT FILES 
+# INPUT FILES
 ###############
+## NUMBERS PARAMETERS
 numbers_file_path: "/Users/gretagalliani/Library/Mobile Documents/com~apple~Numbers/Documents/Contabilità/Libro spese.numbers"
 
+numbers_sheet_mappings:
+  spese: "expenses"
+  entrate: "income"
+  risparmi: "savings"
+
+numbers_date_column: "Data"
+
 # Raw data paths
-raw_expenses_path: "input/finance_raw_expenses.csv"
-raw_income_path: "input/finance_raw_income.csv"
-raw_savings_path: "input/finance_raw_savings.csv"
+raw_paths:
+  expenses: "input/finance_raw_expenses.csv"
+  income: "input/finance_raw_income.csv"
+  savings: "input/finance_raw_savings.csv"
+
+date_column_candidates:
+  - "Data"
 
 # Processed data paths
 processed_expenses_path: "input/finance_processed_expenses.csv"
@@ -59,7 +71,7 @@ income_column_mapping:
 savings_column_mapping:
   "Data": "Date"
   "Descrizione": "Description"
-  "Categoria": "Category" 
+  "Categoria": "Category"
   "Tipo categoria": "CategoryType"
   "Importo": "Value"
 
@@ -105,7 +117,7 @@ valid_income_categories:
   - "Finanza"
   - "Rimborso tasse"
   - "Stipendio"
-  - "Welfare" 
+  - "Welfare"
 
 # Valid categories for savings
 valid_savings_categories:
@@ -126,7 +138,7 @@ color_palette:
   expense: "#f45d48"  # Coral/red from the Secondary color
   balance: "#232323"  # Dark gray from the Headline color
   background: "#f8f5f2"  # Warm cream from the Background color
-  
+
   # Savings section colors - extending the palette with complementary colors
   savings:
     general: "#078080"      # Teal (main highlight color)
@@ -136,7 +148,7 @@ color_palette:
     total: "#232323"        # Dark gray (from headline)
     allocation: "#078080"   # Teal (highlight color)
     spent: "#f45d48"        # Coral (secondary color)
-  
+
   # Category visualization colors - extended while maintaining the palette feeling
   categories:
     - "#078080"  # Teal (highlight)
@@ -180,15 +192,15 @@ chart_styling:
   legend_orientation: "h"
   legend_yanchor: "bottom"
   legend_y: -0.2
-  legend_xanchor: "center" 
+  legend_xanchor: "center"
   legend_x: 0.5
-  
+
   # Margins
   margin_left: 50
   margin_right: 50
   margin_top: 60
   margin_bottom: 80
-  
+
   # Hover styling
   hover_bgcolor: "white"
   hover_font_size: 14

@@ -9,7 +9,15 @@ import polars as pl
 
 @dataclass
 class SkippedRow:
-    """Information about rows skipped during processing."""
+    """
+    Represents a row that was skipped during data processing.
+
+    Attributes:
+        sheet_name: Name of the sheet where the row was found
+        row_index: Index of the row in the original data (1-based for human readability)
+        row_data: The original row data that was skipped
+        reason: Reason why the row was skipped
+    """
 
     sheet_name: str
     row_index: int
@@ -19,7 +27,13 @@ class SkippedRow:
 
 @dataclass
 class ProcessingResult:
-    """Result of processing a Numbers file."""
+    """
+    Represents the result of processing a financial data file.
+
+    Attributes:
+        dataframes: Dictionary mapping sheet names to processed DataFrames
+        skipped_rows: List of rows that were skipped during processing
+    """
 
     dataframes: Dict[str, pl.DataFrame]
     skipped_rows: List[SkippedRow]

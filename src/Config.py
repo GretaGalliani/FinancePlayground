@@ -1,118 +1,104 @@
-#!filepath: src/config.py
+#!/filepath: config.py
 """
-Configuration module for the Finance Dashboard application.
+Configuration module for the finance application.
 
-This module provides a configuration system that loads settings
-from YAML files with required keys and logging support.
+This module handles loading configuration from YAML files and
+providing access to configuration values throughout the application.
 """
 
-import os
 import logging
-from typing import Any, Dict
-import yaml
+import os
+from typing import Any, Dict, Optional, TypeVar, cast
+
+# Add type ignore for yaml module until stubs are installed
+import yaml  # type: ignore
+
+T = TypeVar("T")
 
 
 class Config:
     """
-    Configuration management class for the Finance Dashboard application.
+    Configuration handler class for the finance application.
 
-    This class loads and manages configuration settings from a YAML file,
-    providing access to configuration values with support for nested
-    keys and strict validation.
-
-    Attributes:
-        _config: Dictionary containing the loaded configuration
-        _config_path: Path to the configuration file
-        logger: Logger instance
+    Loads configuration values from a YAML file and provides
+    methods to access those values.
     """
 
-    def __init__(self, source: str, logger: logging.Logger = None):
+    def __init__(
+        self, config_path: str = "config.yaml", logger: Optional[logging.Logger] = None
+    ):
         """
-        Initialize the Config object by loading configuration from a file.
+        Initialize the configuration.
 
         Args:
-            source: Path to the configuration file
-            logger: Logger instance from the main application
-
-        Raises:
-            FileNotFoundError: If the configuration file doesn't exist
-            ValueError: If the configuration file is invalid
+            config_path: Path to the YAML configuration file
+            logger: Logger instance for logging configuration events
         """
+        self.config_path = config_path
         self.logger = logger or logging.getLogger(__name__)
-        self._config_path = source
-        self._config = self._load_config(source)
-        self.logger.info(f"Configuration loaded from {source}")
+        self._config_data: Dict[str, Any] = {}
+        self._load_config()
 
-    def _load_config(self, file_path: str) -> Dict[str, Any]:
+    def _load_config(self) -> None:
         """
-        Load configuration from a YAML file.
-
-        Args:
-            file_path: Path to the configuration file
-
-        Returns:
-            Dict[str, Any]: Dictionary containing the loaded configuration
+        Load configuration from the YAML file.
 
         Raises:
             FileNotFoundError: If the configuration file doesn't exist
-            ValueError: If the configuration file is invalid
+            yaml.YAMLError: If the YAML file is invalid
         """
-        if not os.path.exists(file_path):
-            error_msg = f"Configuration file not found: {file_path}"
-            self.logger.error(error_msg)
-            raise FileNotFoundError(error_msg)
+        if not os.path.exists(self.config_path):
+            self.logger.error(f"Config file not found: {self.config_path}")
+            raise FileNotFoundError(f"Config file not found: {self.config_path}")
 
+        self.logger.info(f"Loading configuration from {self.config_path}")
         try:
-            with open(file_path, "r", encoding="utf-8") as file:
-                config = yaml.safe_load(file)
-
-            if not isinstance(config, dict):
-                error_msg = f"Invalid configuration format in {file_path}"
-                self.logger.error(error_msg)
-                raise ValueError(error_msg)
-
-            return config
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                self._config_data = yaml.safe_load(f)
+            self.logger.info("Configuration loaded successfully")
         except yaml.YAMLError as e:
-            error_msg = f"Error parsing configuration file {file_path}: {str(e)}"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg) from e
+            self.logger.error(f"Error parsing YAML configuration: {str(e)}")
+            raise
 
-    def get(self, key: str) -> Any:
+    def get(self, key: str, default: Optional[T] = None) -> Any:
         """
-        Get a configuration value by key with support for nested keys.
+        Get a configuration value by key.
 
         Args:
-            key: Configuration key (can be dot-separated for nested access)
+            key: The configuration key to look up
+            default: Default value to return if key is not found
 
         Returns:
-            Any: The configuration value
+            The configuration value or the default if not found
+        """
+        value = self._config_data.get(key, default)
+        return cast(T, value) if value is not None else default
+
+    def set(self, key: str, value: Any) -> None:
+        """
+        Set a configuration value.
+
+        This changes the value in memory but does not update the YAML file.
+
+        Args:
+            key: The configuration key to set
+            value: The value to set
+        """
+        self._config_data[key] = value
+        self.logger.debug(f"Set configuration {key}={value}")
+
+    def save(self) -> None:
+        """
+        Save the current configuration to the YAML file.
 
         Raises:
-            KeyError: If the key doesn't exist in the configuration
+            IOError: If the file cannot be written
         """
-        if not key:
-            error_msg = "Empty key provided"
-            self.logger.error(error_msg)
-            raise KeyError(error_msg)
-
-        # Split the key into parts for nested access
-        keys = key.split(".")
-        value = self._config
-
+        self.logger.info(f"Saving configuration to {self.config_path}")
         try:
-            for k in keys:
-                value = value[k]
-            return value
-        except (KeyError, TypeError) as exc:
-            error_msg = f"Configuration key not found: {key}"
-            self.logger.error(error_msg)
-            raise KeyError(error_msg) from exc
-
-    def is_valid(self) -> bool:
-        """
-        Check if the configuration is valid.
-
-        Returns:
-            bool: True if the configuration is valid
-        """
-        return bool(self._config)
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                yaml.dump(self._config_data, f, default_flow_style=False)
+            self.logger.info("Configuration saved successfully")
+        except Exception as e:
+            self.logger.error(f"Error saving configuration: {str(e)}")
+            raise IOError(f"Error saving configuration: {str(e)}") from e

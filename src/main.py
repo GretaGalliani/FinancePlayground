@@ -6,19 +6,19 @@ This module serves as the entry point for the Finance Dashboard application,
 orchestrating the data loading, processing, and visualization components.
 """
 
+import logging
 import os
 import sys
 import traceback
-from datetime import datetime
 from pathlib import Path
 
 import polars as pl
 
-from src.Config import Config
-from src.DataWrangler import DataWrangler
-from src.Process import Process
-from src.FinanceDashboard import FinanceDashboard
-from src.logger import create_logger
+from config import Config
+from data_wrangler import DataWrangler
+from FinanceDashboard import FinanceDashboard
+from logger import create_logger
+from Process import Process
 
 
 def setup_directories():
@@ -81,37 +81,43 @@ def load_data(data_wrangler, config, logger):
     # Try to load data from Numbers file
     logger.info("Loading data from Numbers file...")
     try:
-        raw_dfs = data_wrangler.load_updated_file()
+        result = data_wrangler.load_updated_file()
         logger.info("Successfully loaded data from Numbers file")
 
         # Save skipped rows report if any rows were skipped
-        if data_wrangler.skipped_rows:
-            skipped_rows_path = data_wrangler.save_skipped_rows_report()
+        if result.skipped_rows:
+            skipped_rows_path = data_wrangler.save_skipped_rows_report(
+                result.skipped_rows
+            )
             logger.warning(
-                f"Skipped {len(data_wrangler.skipped_rows)} rows during import. "
+                f"Skipped {len(result.skipped_rows)} rows during import. "
                 f"Report saved to {skipped_rows_path}"
             )
 
-        return raw_dfs
+        return result.dataframes
 
     except Exception as e:
-        logger.warning(f"Error loading data from Numbers file: {e}")
+        logger.error(f"Error loading data from Numbers file: {e}")
         logger.info("Attempting to load data from cached CSV files...")
 
         # Try to load from cached files
         raw_dfs = {}
+        raw_paths = config.get("raw_paths")
         raw_dfs["expenses"] = load_from_cache(
-            config.get("raw_expenses_path"), logger, "Loading expenses from cache"
+            raw_paths.get("expenses"), logger, "Loading expenses from cache"
         )
         raw_dfs["income"] = load_from_cache(
-            config.get("raw_income_path"), logger, "Loading income from cache"
+            raw_paths.get("income"), logger, "Loading income from cache"
         )
         raw_dfs["savings"] = load_from_cache(
-            config.get("raw_savings_path"), logger, "Loading savings from cache"
+            raw_paths.get("savings"), logger, "Loading savings from cache"
         )
 
         # Check if we have the essential data
         if raw_dfs["expenses"] is None or raw_dfs["income"] is None:
+            logger.critical(
+                "Could not load essential data from either Numbers file or cache"
+            )
             raise ValueError(
                 "Could not load essential data from either Numbers file or cache"
             )
@@ -146,12 +152,18 @@ def process_data(process, raw_dfs, config, logger):
     processed_income_path = config.get("processed_income_path")
 
     if processed_expenses_path:
-        df_expenses.write_csv(processed_expenses_path)
-        logger.info(f"Saved processed expenses to {processed_expenses_path}")
+        try:
+            df_expenses.write_csv(processed_expenses_path)
+            logger.info(f"Saved processed expenses to {processed_expenses_path}")
+        except Exception as e:
+            logger.error(f"Failed to save processed expenses: {e}")
 
     if processed_income_path:
-        df_income.write_csv(processed_income_path)
-        logger.info(f"Saved processed income to {processed_income_path}")
+        try:
+            df_income.write_csv(processed_income_path)
+            logger.info(f"Saved processed income to {processed_income_path}")
+        except Exception as e:
+            logger.error(f"Failed to save processed income: {e}")
 
     # Process savings data if available
     df_savings = None
@@ -164,15 +176,22 @@ def process_data(process, raw_dfs, config, logger):
         processed_savings_path = config.get("processed_savings_path")
 
         if processed_savings_path:
-            df_savings.write_csv(processed_savings_path)
-            logger.info(f"Saved processed savings to {processed_savings_path}")
+            try:
+                df_savings.write_csv(processed_savings_path)
+                logger.info(f"Saved processed savings to {processed_savings_path}")
+            except Exception as e:
+                logger.error(f"Failed to save processed savings: {e}")
     else:
-        logger.info("No savings data available, checking for cached processed data...")
+        logger.warning(
+            "No savings data available, checking for cached processed data..."
+        )
         df_savings = load_from_cache(
             config.get("processed_savings_path"),
             logger,
             "Loading processed savings data from cache",
         )
+        if df_savings is None:
+            logger.warning("No cached savings data found")
 
     return df_expenses, df_income, df_savings
 
@@ -195,37 +214,70 @@ def main():
     setup_directories()
 
     # Initialize the application logger
-    logger = create_logger("finance_dashboard")
+    logger = create_logger("finance_dashboard", level=logging.WARNING)
     logger.info("Starting Finance Dashboard application...")
 
     try:
         # Load configuration
-        config_path = os.path.join(os.path.dirname(__file__), "src/config.yaml")
+        config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
         logger.info(f"Loading configuration from {config_path}")
-        config = Config(config_path)
+
+        try:
+            config = Config(config_path)
+        except FileNotFoundError:
+            logger.critical(f"Configuration file not found at {config_path}")
+            return 1
+        except Exception as e:
+            logger.critical(f"Failed to load configuration: {e}")
+            return 1
 
         # Initialize data wrangler and process components with logger
         data_wrangler = DataWrangler(config, logger)
         process = Process(config, logger)
 
         # Load data
-        raw_dfs = load_data(data_wrangler, config, logger)
+        try:
+            raw_dfs = load_data(data_wrangler, config, logger)
+        except ValueError as e:
+            # Error already logged in load_data
+            return 1
 
         # Process data
-        df_expenses, df_income, df_savings = process_data(
-            process, raw_dfs, config, logger
-        )
+        try:
+            df_expenses, df_income, df_savings = process_data(
+                process, raw_dfs, config, logger
+            )
+        except Exception as e:
+            error_traceback = traceback.format_exc()
+            log_error(logger, f"Failed to process data: {str(e)}", error_traceback)
+            return 1
 
         # Generate all intermediate datasets for visualization
         logger.info("Generating visualization datasets...")
-        process.generate_all_datasets(df_expenses, df_income, df_savings)
-        logger.info("Visualization datasets generated successfully")
+        try:
+            process.generate_all_datasets(df_expenses, df_income, df_savings)
+            logger.info("Visualization datasets generated successfully")
+        except Exception as e:
+            error_traceback = traceback.format_exc()
+            log_error(
+                logger,
+                f"Failed to generate visualization datasets: {str(e)}",
+                error_traceback,
+            )
+            logger.error(
+                "Continuing with dashboard initialization, but some features may not work properly"
+            )
 
         # Initialize and run dashboard
         logger.info("Initializing dashboard...")
-        dashboard = FinanceDashboard(config, logger)
-        logger.info("Starting dashboard server...")
-        dashboard.run_server(debug=True)
+        try:
+            dashboard = FinanceDashboard(config, logger)
+            logger.info("Starting dashboard server...")
+            dashboard.run_server(debug=True)
+        except Exception as e:
+            error_traceback = traceback.format_exc()
+            log_error(logger, f"Failed to start dashboard: {str(e)}", error_traceback)
+            return 1
 
     except Exception as e:
         error_traceback = traceback.format_exc()
