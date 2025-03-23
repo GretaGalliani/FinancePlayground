@@ -5,7 +5,7 @@
 numbers_file_path: "/Users/gretagalliani/Library/Mobile Documents/com~apple~Numbers/Documents/Contabilità/Libro spese.numbers"
 
 numbers_sheet_mappings:
-  spese: "expenses"
+  uscite: "expenses"
   entrate: "income"
   risparmi: "savings"
 
