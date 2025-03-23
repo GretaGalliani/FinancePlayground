@@ -133,45 +133,45 @@ default_category: "Varie"  # Miscellaneous
 # COLOR PALETTE
 ###############
 color_palette:
-  # Main indicator colors - based on the inspirational schema
-  income: "#078080"  # Teal from the Button color
-  expense: "#f45d48"  # Coral/red from the Secondary color
-  balance: "#232323"  # Dark gray from the Headline color
-  background: "#f8f5f2"  # Warm cream from the Background color
+  income: "#078080"        # Mint/Teal
+  expense: "#F45D48"       # Coral/Red
+  balance: "#3A86FF"       # Bright blue for balance
+  background: "#FFFFFF"    # Pure white background
+  headline: "#6C3BCE"      # Purple for text and titles
+  text: "#232323"          # Dark gray for body text
 
-  # Savings section colors - extending the palette with complementary colors
+  # Savings section colors
   savings:
-    general: "#078080"      # Teal (main highlight color)
-    vacation: "#f45d48"     # Coral (secondary color)
-    therapy: "#619b8a"      # Muted teal/green (derived from highlight)
-    misc: "#f7a399"         # Muted coral/pink (derived from secondary)
-    total: "#232323"        # Dark gray (from headline)
-    allocation: "#078080"   # Teal (highlight color)
-    spent: "#f45d48"        # Coral (secondary color)
+    general: "#078080"     # Mint/Teal
+    vacation: "#F45D48"    # Coral/Red
+    therapy: "#4FB9B9"     # Light teal
+    misc: "#F6836B"        # Light coral
+    total: "#6C3BCE"       # Vibrant purple
+    allocation: "#078080"  # Mint/Teal
+    spent: "#F45D48"       # Coral/Red
 
-  # Category visualization colors - extended while maintaining the palette feeling
+  # Category visualization colors - Vibrant with good contrast
   categories:
-    - "#078080"  # Teal (highlight)
-    - "#f45d48"  # Coral (secondary)
-    - "#232323"  # Dark gray (headline)
-    - "#619b8a"  # Muted teal
-    - "#f7a399"  # Muted coral
-    - "#4fb9b9"  # Light teal
-    - "#f6836b"  # Light coral
-    - "#396159"  # Dark teal
-    - "#ce4438"  # Dark coral
-    - "#95b8b8"  # Very light teal
-    - "#ffc4bc"  # Very light coral
-    - "#505050"  # Medium gray
-    - "#7da79a"  # Sage green (complementary)
-    - "#e58e7d"  # Salmon (complementary)
-    - "#1f4d4d"  # Very dark teal
-    - "#d4cdc8"  # Light warm gray
-    - "#86b3b3"  # Muted light teal
-    - "#f8b1a8"  # Muted light coral
-    - "#797168"  # Warm taupe
-    - "#bde3e3"  # Pale teal
-
+    - "#078080"    # Mint/Teal
+    - "#F45D48"    # Coral/Red
+    - "#6C3BCE"    # Vibrant purple
+    - "#4FB9B9"    # Light teal
+    - "#F6836B"    # Light coral
+    - "#90EE90"    # Light green
+    - "#FF9E80"    # Light orange
+    - "#396159"    # Dark teal
+    - "#CE4438"    # Dark coral
+    - "#4A1E9E"    # Dark purple
+    - "#FFD166"    # Vibrant yellow
+    - "#FF70A6"    # Pink
+    - "#26547C"    # Navy blue
+    - "#EF476F"    # Bright pink
+    - "#06D6A0"    # Bright teal
+    - "#FFD23F"    # Gold
+    - "#3A86FF"    # Bright blue
+    - "#FB5607"    # Bright orange
+    - "#9D4EDD"    # Lavender
+    - "#00BBF9"    # Sky blue
 
 ###############
 # FONTS

@@ -211,7 +211,11 @@ class CardCreator:
             dbc.Row: Row of cards for the dashboard
         """
         if df_monthly_summary is None or len(df_monthly_summary) == 0:
-            return html.Div("No data available for the selected period.")
+            return html.Div(
+                "No data available for the selected period.",
+                style={"color": self.color_theme.get("headline", "#6C3BCE")},
+                className="text-center p-4",
+            )
 
         total_income = df_monthly_summary["Income"].sum()
         total_expenses = df_monthly_summary["Expenses"].sum()
@@ -312,14 +316,22 @@ class CardCreator:
             dbc.Row: Row of cards for the dashboard
         """
         if df_savings_metrics is None or len(df_savings_metrics) == 0:
-            return html.Div("No savings data available for the selected period.")
+            return html.Div(
+                "No savings data available for the selected period.",
+                style={"color": self.color_theme.get("headline", "#6C3BCE")},
+                className="text-center p-4",
+            )
 
         # Get the latest month's metrics
         latest_month = df_savings_metrics["Month"].max()
         latest_metrics = df_savings_metrics.filter(pl.col("Month") == latest_month)
 
         if len(latest_metrics) == 0:
-            return html.Div("No savings metrics available for the selected period.")
+            return html.Div(
+                "No savings metrics available for the selected period.",
+                style={"color": self.color_theme.get("headline", "#6C3BCE")},
+                className="text-center p-4",
+            )
 
         total_savings = latest_metrics["TotalSavings"][0]
         total_allocated = latest_metrics["TotalAllocated"][0]
@@ -417,6 +429,79 @@ class CardCreator:
 
         return cards
 
+    def create_savings_table(self, df_savings: Optional[pl.DataFrame]) -> Any:
+        """
+        Create a table of savings transactions with white background.
+
+        Args:
+            df_savings: DataFrame with savings transactions
+
+        Returns:
+            dash_table.DataTable: DataTable component for the dashboard
+        """
+        if df_savings is None or len(df_savings) == 0:
+            return html.Div(
+                "No savings transactions available for the selected period.",
+                style={"color": self.color_theme.get("headline", "#6C3BCE")},
+                className="text-center p-4",
+            )
+
+        # Create a copy of the dataframe with sorted data
+        df_table = df_savings.sort("Date", descending=True)
+
+        # Format date and numeric columns for display
+        df_table = df_table.with_columns(
+            [
+                pl.col("Date").dt.strftime("%d/%m/%Y").alias("Date"),
+                pl.col("Value")
+                .map_elements(lambda x: f"€{x:.2f}", return_dtype=pl.Utf8)
+                .alias("Amount"),
+            ]
+        )
+
+        # Select and rename columns for display
+        df_display = df_table.select(
+            ["Date", "Description", "Category", "CategoryType", "Value"]
+        )
+
+        # Convert directly to records for Dash without using pandas
+        records = df_display.to_dicts()
+
+        # Create the table with white background and purple accents
+        table = dash_table.DataTable(
+            data=records,
+            columns=[{"name": col, "id": col} for col in df_display.columns],
+            style_table={"overflowX": "auto"},
+            style_cell={
+                "textAlign": "left",
+                "padding": "10px",
+                "whiteSpace": "normal",
+                "height": "auto",
+                "backgroundColor": "white",
+            },
+            style_header={
+                "backgroundColor": "rgba(108, 59, 206, 0.1)",  # Light purple background
+                "fontWeight": "bold",
+                "color": self.color_theme.get("headline", "#6C3BCE"),
+                "borderBottom": f"2px solid {self.color_theme.get('headline', '#6C3BCE')}",
+            },
+            style_data_conditional=[
+                {
+                    "if": {"filter_query": '{CategoryType} = "Accantonamento"'},
+                    "backgroundColor": "rgba(7, 128, 128, 0.05)",  # Very light teal
+                    "borderLeft": f"3px solid {self.color_theme['income']}",
+                },
+                {
+                    "if": {"filter_query": "{Value} < 0"},
+                    "backgroundColor": "rgba(244, 93, 72, 0.05)",  # Very light coral
+                    "borderLeft": f"3px solid {self.color_theme['expense']}",
+                },
+            ],
+            page_size=10,
+        )
+
+        return table
+
 
 class DateParser:
     """
@@ -498,7 +583,7 @@ class DashboardLayout:
 
     def create_layout(self) -> Any:
         """
-        Create the dashboard layout.
+        Create the dashboard layout with white background.
 
         Returns:
             dbc.Container: Container with dashboard layout
@@ -519,12 +604,26 @@ class DashboardLayout:
         body_style = {
             "backgroundColor": self.color_theme["background"],
             "fontFamily": f'"{body_font}", sans-serif',
+            "color": self.color_theme.get("text", "#232323"),
         }
 
         heading_style = {
             "fontFamily": f'"{title_font}", sans-serif',
             "fontWeight": "600",
-            "color": self.color_theme.get("headline", "#232323"),
+            "color": self.color_theme.get("headline", "#6C3BCE"),
+            "marginBottom": "1.5rem",
+        }
+
+        tab_style = {
+            "backgroundColor": self.color_theme["background"],
+            "borderBottom": f"1px solid #E2E8F0",
+            "padding": "12px 24px",
+            "fontWeight": "600",
+        }
+
+        active_tab_style = {
+            "borderBottom": f"3px solid {self.color_theme.get('headline', '#6C3BCE')}",
+            "color": self.color_theme.get("headline", "#6C3BCE"),
         }
 
         return dbc.Container(
@@ -603,10 +702,8 @@ class DashboardLayout:
                             ],
                             label="Expenses & Income",
                             tab_id="expenses-tab",
-                            style={"backgroundColor": self.color_theme["background"]},
-                            tab_style={
-                                "backgroundColor": self.color_theme["background"]
-                            },
+                            style=tab_style,
+                            active_tab_style=active_tab_style,  # Use active_tab_style instead of active_style
                         ),
                         dbc.Tab(
                             [
@@ -632,10 +729,8 @@ class DashboardLayout:
                             ],
                             label="Savings",
                             tab_id="savings-tab",
-                            style={"backgroundColor": self.color_theme["background"]},
-                            tab_style={
-                                "backgroundColor": self.color_theme["background"]
-                            },
+                            style=tab_style,
+                            active_tab_style=active_tab_style,  # Use active_tab_style instead of active_style
                         ),
                     ],
                     id="dashboard-tabs",
@@ -667,7 +762,7 @@ class ChartStyler:
 
     def apply_styling(self, fig: go.Figure, title: str) -> go.Figure:
         """
-        Apply consistent styling to a figure.
+        Apply consistent styling to a figure with white background.
 
         Args:
             fig: Plotly figure to style
@@ -681,43 +776,54 @@ class ChartStyler:
 
         # Apply consistent styling to the figure
         fig.update_layout(
-            title=title,
+            title={
+                "text": title,
+                "font": {
+                    "color": self.config.color_theme.get("headline", "#6C3BCE"),
+                    "family": self.config.fonts.get("title_font", "Montserrat"),
+                    "size": 20,
+                },
+            },
             plot_bgcolor=self.config.color_theme["background"],
             paper_bgcolor=self.config.color_theme["background"],
-            font=dict(color="#232323"),
+            font=dict(
+                color=self.config.color_theme.get("text", "#232323"),
+                family=self.config.fonts.get("body_font", "Open Sans"),
+            ),
             yaxis=dict(
-                titlefont=dict(color="#232323"),
-                tickfont=dict(color="#222525"),
-                gridcolor="rgba(35, 35, 35, 0.1)",
+                titlefont=dict(color=self.config.color_theme.get("text", "#232323")),
+                tickfont=dict(color=self.config.color_theme.get("text", "#232323")),
+                gridcolor="rgba(35, 35, 35, 0.05)",  # Lighter gridlines for white background
                 # Format y-axis ticks with euro symbol
                 tickformat="€%{y:,.2f}",
             ),
             xaxis=dict(
-                titlefont=dict(color="#232323"),
-                tickfont=dict(color="#222525"),
-                gridcolor="rgba(35, 35, 35, 0.1)",
+                titlefont=dict(color=self.config.color_theme.get("text", "#232323")),
+                tickfont=dict(color=self.config.color_theme.get("text", "#232323")),
+                gridcolor="rgba(35, 35, 35, 0.05)",  # Lighter gridlines for white background
             ),
-            # Standard legend position at bottom
             legend=dict(
                 orientation=chart_config.get("legend_orientation", "h"),
                 yanchor=chart_config.get("legend_yanchor", "bottom"),
                 y=chart_config.get("legend_y", -0.2),
                 xanchor=chart_config.get("legend_xanchor", "center"),
                 x=chart_config.get("legend_x", 0.5),
-                bgcolor=self.config.color_theme.get("background", "#f8f5f2"),
-                font=dict(color="#222525"),
+                bgcolor=self.config.color_theme.get("background", "#FFFFFF"),
+                font=dict(color=self.config.color_theme.get("text", "#232323")),
+                bordercolor=self.config.color_theme.get("headline", "#6C3BCE"),
+                borderwidth=1,
             ),
             margin=dict(
                 l=chart_config.get("margin_left", 50),
                 r=chart_config.get("margin_right", 50),
                 t=chart_config.get("margin_top", 60),
-                b=chart_config.get("margin_bottom", 80),  # Increased for legend
+                b=chart_config.get("margin_bottom", 80),
             ),
-            # Standard hover label formatting
             hoverlabel=dict(
-                bgcolor=chart_config.get("hover_bgcolor", "white"),
+                bgcolor="white",
                 font_size=chart_config.get("hover_font_size", 14),
                 font_family=chart_config.get("hover_font_family", "Open Sans"),
+                bordercolor=self.config.color_theme.get("headline", "#6C3BCE"),
             ),
         )
 
@@ -733,74 +839,6 @@ class ChartStyler:
                 )
 
         return fig
-
-    def create_savings_table(self, df_savings: Optional[pl.DataFrame]) -> Any:
-        """
-        Create a table of savings transactions.
-
-        Args:
-            df_savings: DataFrame with savings transactions
-
-        Returns:
-            dash_table.DataTable: DataTable component for the dashboard
-        """
-        if df_savings is None or len(df_savings) == 0:
-            return html.Div(
-                "No savings transactions available for the selected period."
-            )
-
-        # Create a copy of the dataframe with sorted data
-        df_table = df_savings.sort("Date", descending=True)
-
-        # Format date and numeric columns for display
-        df_table = df_table.with_columns(
-            [
-                pl.col("Date").dt.strftime("%d/%m/%Y").alias("Date"),
-                pl.col("Value")
-                .map_elements(lambda x: f"€{x:.2f}", return_dtype=pl.Utf8)
-                .alias("Amount"),
-            ]
-        )
-
-        # Select and rename columns for display
-        df_display = df_table.select(
-            ["Date", "Description", "Category", "CategoryType", "Value"]
-        )
-
-        # Convert directly to records for Dash without using pandas
-        records = df_display.to_dicts()
-
-        # Create the table
-        table = dash_table.DataTable(
-            data=records,
-            columns=[{"name": col, "id": col} for col in df_display.columns],
-            style_table={"overflowX": "auto"},
-            style_cell={
-                "textAlign": "left",
-                "padding": "10px",
-                "whiteSpace": "normal",
-                "height": "auto",
-            },
-            style_header={
-                "backgroundColor": "rgb(230, 230, 230)",
-                "fontWeight": "bold",
-            },
-            style_data_conditional=[
-                {
-                    "if": {"filter_query": '{Type} = "Allocation"'},
-                    "backgroundColor": "rgba(230, 126, 34, 0.2)",
-                },
-                {
-                    "if": {"filter_query": '{Type} = "Transfer"'},
-                    "backgroundColor": "rgba(39, 174, 96, 0.2)",
-                },
-                {
-                    "if": {"filter_query": '{Type} = "Payment"'},
-                    "backgroundColor": "rgba(231, 76, 60, 0.2)",
-                },
-            ],
-            page_size=10,
-        )
 
 
 class ChartFactory:
@@ -918,6 +956,7 @@ class ChartFactory:
                         yref="paper",
                         x=0.5,
                         y=0.5,
+                        font=dict(color=self.color_theme.get("headline", "#6C3BCE")),
                     )
                 ],
             )
@@ -932,6 +971,9 @@ class ChartFactory:
                 y=df_monthly_summary["Income"],
                 name="Income",
                 marker_color=self.color_theme["income"],
+                marker_line_color=self.color_theme["income"],
+                marker_line_width=1.5,
+                opacity=0.9,
             )
         )
 
@@ -942,6 +984,9 @@ class ChartFactory:
                 y=df_monthly_summary["Expenses"],
                 name="Expenses",
                 marker_color=self.color_theme["expense"],
+                marker_line_color=self.color_theme["expense"],
+                marker_line_width=1.5,
+                opacity=0.9,
             )
         )
 
@@ -952,6 +997,8 @@ class ChartFactory:
                 y=df_monthly_summary["Balance"],
                 name="Balance",
                 line=dict(color=self.color_theme["balance"], width=3),
+                mode="lines+markers",
+                marker=dict(size=8, color=self.color_theme["balance"]),
             )
         )
 
