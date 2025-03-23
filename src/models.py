@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import polars as pl # pylint: disable=import-error
-from pydantic import BaseModel # pylint: disable=import-error
+import polars as pl  # pylint: disable=import-error
+from pydantic import BaseModel  # pylint: disable=import-error
 
 
 @dataclass
@@ -57,6 +57,7 @@ class ProcessingResult:
             "sheets_with_issues_names": list(sheets_with_issues),
         }
 
+
 # pylint: disable=too-few-public-methods
 class FinancialRecord(BaseModel):
     """
@@ -76,6 +77,7 @@ class FinancialRecord(BaseModel):
 
     class Config:
         """Pydantic configuration."""
+
         arbitrary_types_allowed = True
 
 
