@@ -2,13 +2,17 @@
 """
 Test suite for the data models.
 
-This module contains tests for the SkippedRow and ProcessingResult classes in models.py.
+This module contains tests for model classes in models.py.
 """
 import os
 import sys
 import unittest
+from datetime import datetime
+from dataclasses import field
 
 import polars as pl
+import pytest
+from pydantic import ValidationError
 
 # Add the project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +21,9 @@ sys.path.insert(0, project_root)
 from src.models import (  # pylint: disable=wrong-import-position,import-error
     ProcessingResult,
     SkippedRow,
+    FinancialRecord,
+    SavingsRecord,
+    ProcessingStats,
 )
 
 
@@ -164,6 +171,148 @@ class TestProcessingResult(unittest.TestCase):
         self.assertEqual(summary["total_skipped_rows"], 0)
         self.assertEqual(summary["sheets_with_issues"], 0)
         self.assertEqual(summary["sheets_with_issues_names"], [])
+
+
+class TestFinancialRecord(unittest.TestCase):
+    """Tests for the FinancialRecord Pydantic model."""
+
+    def test_financial_record_creation(self) -> None:
+        """Test FinancialRecord can be created with valid data."""
+        record = FinancialRecord(
+            Date=datetime(2023, 1, 1),
+            Description="Grocery shopping",
+            Category="Food",
+            Value=75.50
+        )
+
+        self.assertEqual(record.Date, datetime(2023, 1, 1))
+        self.assertEqual(record.Description, "Grocery shopping")
+        self.assertEqual(record.Category, "Food")
+        self.assertEqual(record.Value, 75.50)
+
+    def test_financial_record_validation(self) -> None:
+        """Test that FinancialRecord validates data types."""
+        # Should raise ValidationError with invalid date
+        with self.assertRaises(ValidationError):
+            FinancialRecord(
+                Date="not-a-date",
+                Description="Grocery shopping",
+                Category="Food",
+                Value=75.50
+            )
+
+        # Should raise ValidationError with invalid value
+        with self.assertRaises(ValidationError):
+            FinancialRecord(
+                Date=datetime(2023, 1, 1),
+                Description="Grocery shopping",
+                Category="Food",
+                Value="not-a-number"
+            )
+
+    def test_financial_record_to_dict(self) -> None:
+        """Test that FinancialRecord can be converted to a dictionary."""
+        record = FinancialRecord(
+            Date=datetime(2023, 1, 1),
+            Description="Grocery shopping",
+            Category="Food",
+            Value=75.50
+        )
+        
+        record_dict = record.dict()
+        self.assertIsInstance(record_dict, dict)
+        self.assertEqual(record_dict["Date"], datetime(2023, 1, 1))
+        self.assertEqual(record_dict["Description"], "Grocery shopping")
+        self.assertEqual(record_dict["Category"], "Food")
+        self.assertEqual(record_dict["Value"], 75.50)
+
+
+class TestSavingsRecord(unittest.TestCase):
+    """Tests for the SavingsRecord Pydantic model."""
+
+    def test_savings_record_creation(self) -> None:
+        """Test SavingsRecord can be created with valid data."""
+        record = SavingsRecord(
+            Date=datetime(2023, 1, 1),
+            Description="Vacation fund",
+            Category="Travel",
+            CategoryType="Accantonamento",
+            Value=200.00
+        )
+
+        self.assertEqual(record.Date, datetime(2023, 1, 1))
+        self.assertEqual(record.Description, "Vacation fund")
+        self.assertEqual(record.Category, "Travel")
+        self.assertEqual(record.CategoryType, "Accantonamento")
+        self.assertEqual(record.Value, 200.00)
+
+    def test_savings_record_inheritance(self) -> None:
+        """Test that SavingsRecord inherits from FinancialRecord."""
+        record = SavingsRecord(
+            Date=datetime(2023, 1, 1),
+            Description="Vacation fund",
+            Category="Travel",
+            CategoryType="Accantonamento",
+            Value=200.00
+        )
+        
+        self.assertIsInstance(record, FinancialRecord)
+        
+    def test_savings_record_validation(self) -> None:
+        """Test that SavingsRecord validates data types."""
+        # Should raise ValidationError with missing CategoryType
+        with self.assertRaises(ValidationError):
+            SavingsRecord(
+                Date=datetime(2023, 1, 1),
+                Description="Vacation fund",
+                Category="Travel",
+                Value=200.00
+            )
+
+
+class TestProcessingStats(unittest.TestCase):
+    """Tests for the ProcessingStats dataclass."""
+
+    def test_processing_stats_creation(self) -> None:
+        """Test ProcessingStats can be created with required attributes."""
+        stats = ProcessingStats(source_rows=100, processed_rows=95)
+        
+        self.assertEqual(stats.source_rows, 100)
+        self.assertEqual(stats.processed_rows, 95)
+        self.assertEqual(stats.invalid_rows, 0)  # Default value
+        self.assertEqual(stats.skipped_categories, [])  # Empty list by default
+        self.assertEqual(stats.errors, [])  # Empty list by default
+
+    def test_processing_stats_with_custom_values(self) -> None:
+        """Test ProcessingStats can be created with custom values."""
+        stats = ProcessingStats(
+            source_rows=100,
+            processed_rows=90,
+            invalid_rows=10,
+            skipped_categories=["Unknown", "Invalid"],
+            errors=["Date parsing error", "Missing required field"]
+        )
+        
+        self.assertEqual(stats.source_rows, 100)
+        self.assertEqual(stats.processed_rows, 90)
+        self.assertEqual(stats.invalid_rows, 10)
+        self.assertEqual(stats.skipped_categories, ["Unknown", "Invalid"])
+        self.assertEqual(stats.errors, ["Date parsing error", "Missing required field"])
+
+    def test_processing_stats_default_lists(self) -> None:
+        """Test that default lists are initialized correctly."""
+        stats = ProcessingStats(source_rows=100, processed_rows=95)
+        
+        # Default lists should be initialized as empty lists
+        self.assertEqual(stats.skipped_categories, [])
+        self.assertEqual(stats.errors, [])
+        
+        # Lists should be mutable
+        stats.skipped_categories.append("Unknown")
+        stats.errors.append("Error message")
+        
+        self.assertEqual(stats.skipped_categories, ["Unknown"])
+        self.assertEqual(stats.errors, ["Error message"])
 
 
 if __name__ == "__main__":
