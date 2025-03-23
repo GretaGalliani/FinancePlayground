@@ -583,7 +583,7 @@ class DashboardLayout:
 
     def create_layout(self) -> Any:
         """
-        Create the dashboard layout with white background.
+        Create the dashboard layout with bold purple headings.
 
         Returns:
             dbc.Container: Container with dashboard layout
@@ -604,13 +604,13 @@ class DashboardLayout:
         body_style = {
             "backgroundColor": self.color_theme["background"],
             "fontFamily": f'"{body_font}", sans-serif',
-            "color": self.color_theme.get("text", "#232323"),
+            "color": self.color_theme.get("text", "#232323"),  # Dark text for body
         }
 
         heading_style = {
             "fontFamily": f'"{title_font}", sans-serif',
-            "fontWeight": "600",
-            "color": self.color_theme.get("headline", "#6C3BCE"),
+            "fontWeight": "700",  # Make bolder (700 instead of 600)
+            "color": self.color_theme.get("headline", "#6C3BCE"),  # Purple for headings
             "marginBottom": "1.5rem",
         }
 
@@ -619,11 +619,17 @@ class DashboardLayout:
             "borderBottom": f"1px solid #E2E8F0",
             "padding": "12px 24px",
             "fontWeight": "600",
+            "color": self.color_theme.get(
+                "text", "#232323"
+            ),  # Dark text for inactive tabs
         }
 
         active_tab_style = {
             "borderBottom": f"3px solid {self.color_theme.get('headline', '#6C3BCE')}",
-            "color": self.color_theme.get("headline", "#6C3BCE"),
+            "fontWeight": "700",  # Make active tab bolder
+            "color": self.color_theme.get(
+                "headline", "#6C3BCE"
+            ),  # Purple for active tab
         }
 
         return dbc.Container(
@@ -633,6 +639,7 @@ class DashboardLayout:
                     className="text-center mt-4 mb-4",
                     style=heading_style,
                 ),
+                # Rest of the layout remains the same
                 dbc.Row(
                     [
                         dbc.Col(
@@ -703,7 +710,7 @@ class DashboardLayout:
                             label="Expenses & Income",
                             tab_id="expenses-tab",
                             style=tab_style,
-                            active_tab_style=active_tab_style,  # Use active_tab_style instead of active_style
+                            active_tab_style=active_tab_style,
                         ),
                         dbc.Tab(
                             [
@@ -723,14 +730,14 @@ class DashboardLayout:
                                 html.H4(
                                     "Savings Transactions",
                                     className="mt-4 mb-3",
-                                    style=heading_style,
+                                    style=heading_style,  # Apply same heading style to subheader
                                 ),
                                 html.Div(id="savings-table"),
                             ],
                             label="Savings",
                             tab_id="savings-tab",
                             style=tab_style,
-                            active_tab_style=active_tab_style,  # Use active_tab_style instead of active_style
+                            active_tab_style=active_tab_style,
                         ),
                     ],
                     id="dashboard-tabs",
@@ -762,7 +769,7 @@ class ChartStyler:
 
     def apply_styling(self, fig: go.Figure, title: str) -> go.Figure:
         """
-        Apply consistent styling to a figure with white background.
+        Apply consistent styling with purple titles and dark text for legends.
 
         Args:
             fig: Plotly figure to style
@@ -782,12 +789,15 @@ class ChartStyler:
                     "color": self.config.color_theme.get("headline", "#6C3BCE"),
                     "family": self.config.fonts.get("title_font", "Montserrat"),
                     "size": 20,
+                    "weight": "bold",  # Make title bold
                 },
             },
             plot_bgcolor=self.config.color_theme["background"],
             paper_bgcolor=self.config.color_theme["background"],
             font=dict(
-                color=self.config.color_theme.get("text", "#232323"),
+                color=self.config.color_theme.get(
+                    "text", "#232323"
+                ),  # Dark text for all elements
                 family=self.config.fonts.get("body_font", "Open Sans"),
             ),
             yaxis=dict(
@@ -809,8 +819,10 @@ class ChartStyler:
                 xanchor=chart_config.get("legend_xanchor", "center"),
                 x=chart_config.get("legend_x", 0.5),
                 bgcolor=self.config.color_theme.get("background", "#FFFFFF"),
-                font=dict(color=self.config.color_theme.get("text", "#232323")),
-                bordercolor=self.config.color_theme.get("headline", "#6C3BCE"),
+                font=dict(
+                    color=self.config.color_theme.get("text", "#232323")
+                ),  # Dark text for legend
+                bordercolor="#E2E8F0",  # Subtle border
                 borderwidth=1,
             ),
             margin=dict(
@@ -823,7 +835,9 @@ class ChartStyler:
                 bgcolor="white",
                 font_size=chart_config.get("hover_font_size", 14),
                 font_family=chart_config.get("hover_font_family", "Open Sans"),
-                bordercolor=self.config.color_theme.get("headline", "#6C3BCE"),
+                font=dict(
+                    color=self.config.color_theme.get("text", "#232323")
+                ),  # Dark text for hover labels
             ),
         )
 
@@ -934,7 +948,7 @@ class ChartFactory:
         self, df_monthly_summary: Optional[pl.DataFrame]
     ) -> go.Figure:
         """
-        Create a monthly overview figure with income, expenses, and balance.
+        Create a monthly overview figure with income, expenses, and better blue balance.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
@@ -956,7 +970,7 @@ class ChartFactory:
                         yref="paper",
                         x=0.5,
                         y=0.5,
-                        font=dict(color=self.color_theme.get("headline", "#6C3BCE")),
+                        font=dict(color=self.color_theme.get("text", "#232323")),
                     )
                 ],
             )
@@ -990,7 +1004,7 @@ class ChartFactory:
             )
         )
 
-        # Add balance line
+        # Add balance line with new blue color
         fig.add_trace(
             go.Scatter(
                 x=df_monthly_summary["Month"],

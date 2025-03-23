@@ -137,7 +137,7 @@ color_palette:
   expense: "#F45D48"       # Coral/Red
   balance: "#4361EE"       # Bright blue for balance
   background: "#FFFFFF"    # Pure white background
-  headline: "#6C3BCE"      # Purple for text and titles
+  headline: "#232323"      # Dark gray for headlines
   text: "#232323"          # Dark gray for body text
 
   # Savings section colors
