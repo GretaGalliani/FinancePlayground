@@ -596,9 +596,11 @@ class AnalyticsGenerator:
                 allocation_data.append(
                     {
                         "Category": category,
-                        "Type": "Allocated"
-                        if category_type == "Accantonamento"
-                        else "Saved",
+                        "Type": (
+                            "Allocated"
+                            if category_type == "Accantonamento"
+                            else "Saved"
+                        ),
                         "Value": positive_sum,
                     }
                 )
@@ -610,9 +612,11 @@ class AnalyticsGenerator:
                 allocation_data.append(
                     {
                         "Category": category,
-                        "Type": "Spent from Allocations"
-                        if category_type == "Accantonamento"
-                        else "Spent from Savings",
+                        "Type": (
+                            "Spent from Allocations"
+                            if category_type == "Accantonamento"
+                            else "Spent from Savings"
+                        ),
                         "Value": negative_sum,
                     }
                 )
@@ -854,17 +858,21 @@ class Process:
         min_date = min(
             df_expenses["Date"].min(),
             df_income["Date"].min(),
-            df_savings["Date"].min()
-            if df_savings is not None and len(df_savings) > 0
-            else datetime.now(),
+            (
+                df_savings["Date"].min()
+                if df_savings is not None and len(df_savings) > 0
+                else datetime.now()
+            ),
         )
 
         max_date = max(
             df_expenses["Date"].max(),
             df_income["Date"].max(),
-            df_savings["Date"].max()
-            if df_savings is not None and len(df_savings) > 0
-            else datetime.now(),
+            (
+                df_savings["Date"].max()
+                if df_savings is not None and len(df_savings) > 0
+                else datetime.now()
+            ),
         )
 
         self.logger.info(

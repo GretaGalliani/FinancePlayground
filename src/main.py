@@ -17,7 +17,7 @@ import polars as pl
 
 from config import Config
 from data_wrangler import DataWrangler
-from FinanceDashboard import FinanceDashboard
+from finance_dashboard import FinanceDashboard
 from logger import create_logger
 from models import ProcessingResult
 from process import Process
