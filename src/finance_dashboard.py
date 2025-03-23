@@ -203,7 +203,7 @@ class CardCreator:
 
     def create_summary_cards(self, df_monthly_summary: Optional[pl.DataFrame]) -> Any:
         """
-        Create summary cards for income, expenses, and balance.
+        Create summary cards for income, expenses, and balance with improved formatting.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
@@ -227,20 +227,24 @@ class CardCreator:
         monthly_avg_expenses = total_expenses / months_count if months_count > 0 else 0
         monthly_avg_balance = total_balance / months_count if months_count > 0 else 0
 
+        # Format numbers with thousands separator (,) and decimal point (.)
+        def format_currency(value):
+            return f"{value:,.2f}€"
+
         cards = dbc.Row(
             [
                 dbc.Col(
                     dbc.Card(
                         dbc.CardBody(
                             [
-                                html.H5("Total Income (€)", className="card-title"),
-                                html.H4(
-                                    f"{total_income:.2f}",
-                                    className="card-text",
+                                html.H5("Total Income", className="card-title"),
+                                html.H3(
+                                    format_currency(total_income),
+                                    className="card-text font-weight-bold",
                                     style={"color": self.color_theme["income"]},
                                 ),
                                 html.P(
-                                    f"Monthly average: {monthly_avg_income:.2f} €",
+                                    f"Monthly average: {format_currency(monthly_avg_income)}",
                                     className="text-muted small",
                                 ),
                             ]
@@ -257,14 +261,14 @@ class CardCreator:
                     dbc.Card(
                         dbc.CardBody(
                             [
-                                html.H5("Total Expenses (€)", className="card-title"),
-                                html.H4(
-                                    f"{total_expenses:.2f}",
-                                    className="card-text",
+                                html.H5("Total Expenses", className="card-title"),
+                                html.H3(
+                                    format_currency(total_expenses),
+                                    className="card-text font-weight-bold",
                                     style={"color": self.color_theme["expense"]},
                                 ),
                                 html.P(
-                                    f"Monthly average: {monthly_avg_expenses:.2f} €",
+                                    f"Monthly average: {format_currency(monthly_avg_expenses)}",
                                     className="text-muted small",
                                 ),
                             ]
@@ -281,14 +285,14 @@ class CardCreator:
                     dbc.Card(
                         dbc.CardBody(
                             [
-                                html.H5("Balance (€)", className="card-title"),
-                                html.H4(
-                                    f"{total_balance:.2f}",
-                                    className="card-text",
+                                html.H5("Balance", className="card-title"),
+                                html.H3(
+                                    format_currency(total_balance),
+                                    className="card-text font-weight-bold",
                                     style={"color": self.color_theme["balance"]},
                                 ),
                                 html.P(
-                                    f"Monthly average: {monthly_avg_balance:.2f} €",
+                                    f"Monthly average: {format_currency(monthly_avg_balance)}",
                                     className="text-muted small",
                                 ),
                             ]
@@ -773,6 +777,35 @@ class DashboardLayout:
                                         ),
                                     ]
                                 ),
+                                # REORDERED: Display stacked charts (monthly breakdown) in full rows
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(
+                                                id="stacked-expenses",
+                                                style={
+                                                    "height": "500px"
+                                                },  # Taller graph
+                                            ),
+                                            width=12,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(
+                                                id="stacked-income",
+                                                style={
+                                                    "height": "500px"
+                                                },  # Taller graph
+                                            ),
+                                            width=12,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
                                 dbc.Row(
                                     [
                                         dbc.Col(
@@ -782,20 +815,6 @@ class DashboardLayout:
                                         ),
                                         dbc.Col(
                                             dcc.Graph(id="income-pie-chart"),
-                                            width=6,
-                                            className="mb-4",
-                                        ),
-                                    ]
-                                ),
-                                dbc.Row(
-                                    [
-                                        dbc.Col(
-                                            dcc.Graph(id="stacked-expenses"),
-                                            width=6,
-                                            className="mb-4",
-                                        ),
-                                        dbc.Col(
-                                            dcc.Graph(id="stacked-income"),
                                             width=6,
                                             className="mb-4",
                                         ),
@@ -825,7 +844,7 @@ class DashboardLayout:
                                 html.H4(
                                     "Savings Transactions",
                                     className="mt-4 mb-3",
-                                    style=heading_style,  # Apply same heading style to subheader
+                                    style=heading_style,
                                 ),
                                 html.Div(id="savings-table"),
                             ],
@@ -934,18 +953,9 @@ class ChartStyler:
                     color=self.config.color_theme.get("text", "#232323")
                 ),  # Dark text for hover labels
             ),
+            # Use unified hover mode to show date only once at the top
+            hovermode="x unified",
         )
-
-        # Set hover templates for different types of traces
-        for trace in fig.data:
-            if trace.type == "bar":
-                trace.hovertemplate = "%{x}<br>%{y:,.2f} €<extra></extra>"
-            elif trace.type == "scatter":
-                trace.hovertemplate = "%{x}<br>%{y:,.2f} €<extra></extra>"
-            elif trace.type == "pie":
-                trace.hovertemplate = (
-                    "%{label}<br>%{value:,.2f} € (%{percent})<extra></extra>"
-                )
 
         return fig
 
@@ -1043,7 +1053,7 @@ class ChartFactory:
         self, df_monthly_summary: Optional[pl.DataFrame]
     ) -> go.Figure:
         """
-        Create a monthly overview figure with income, expenses, and better blue balance.
+        Create a monthly overview figure with larger colored indicators in hover text.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
@@ -1079,6 +1089,32 @@ class ChartFactory:
             month_name = datetime(2000, month_num, 1).strftime("%b")
             months.append(f"{month_name} {year}")
 
+        # Create combined data for hover
+        combined_data = []
+        for i in range(len(months)):
+            combined_data.append(
+                {
+                    "month": months[i],
+                    "income": df_monthly_summary["Income"][i],
+                    "expenses": df_monthly_summary["Expenses"][i],
+                    "balance": df_monthly_summary["Balance"][i],
+                }
+            )
+
+        # Get color values
+        income_color = self.color_theme["income"]
+        expense_color = self.color_theme["expense"]
+        balance_color = self.color_theme["balance"]
+
+        # Create hover template with colored squares
+        hover_template = (
+            "<b>%{customdata.month}</b><br>"
+            f"<span style='color:{income_color}; font-size:22px;'>■</span> Income: %{{customdata.income:,.2f}}€<br>"
+            f"<span style='color:{expense_color}; font-size:22px;'>■</span> Expenses: %{{customdata.expenses:,.2f}}€<br>"
+            f"<span style='color:{balance_color}; font-size:22px;'>■</span> Balance: %{{customdata.balance:,.2f}}€"
+            "<extra></extra>"
+        )
+
         fig = go.Figure()
 
         # Add income bars
@@ -1087,11 +1123,12 @@ class ChartFactory:
                 x=months,
                 y=df_monthly_summary["Income"],
                 name="Income",
-                marker_color=self.color_theme["income"],
-                marker_line_color=self.color_theme["income"],
+                marker_color=income_color,
+                marker_line_color=income_color,
                 marker_line_width=1.5,
                 opacity=0.9,
-                hovertemplate="%{x}<br>Income: %{y:,.2f}€<extra></extra>",
+                customdata=combined_data,
+                hovertemplate=hover_template,
             )
         )
 
@@ -1101,38 +1138,37 @@ class ChartFactory:
                 x=months,
                 y=df_monthly_summary["Expenses"],
                 name="Expenses",
-                marker_color=self.color_theme["expense"],
-                marker_line_color=self.color_theme["expense"],
+                marker_color=expense_color,
+                marker_line_color=expense_color,
                 marker_line_width=1.5,
                 opacity=0.9,
-                hovertemplate="%{x}<br>Expenses: %{y:,.2f}€<extra></extra>",
+                customdata=combined_data,
+                hovertemplate=hover_template,
             )
         )
 
-        # Add balance line with new blue color
+        # Add balance line
         fig.add_trace(
             go.Scatter(
                 x=months,
                 y=df_monthly_summary["Balance"],
                 name="Balance",
-                line=dict(color=self.color_theme["balance"], width=3),
+                line=dict(color=balance_color, width=3),
                 mode="lines+markers",
-                marker=dict(size=8, color=self.color_theme["balance"]),
-                hovertemplate="%{x}<br>Balance: %{y:,.2f}€<extra></extra>",
+                marker=dict(size=8, color=balance_color),
+                customdata=combined_data,
+                hovertemplate=hover_template,
             )
         )
 
         fig = self.chart_styler.apply_styling(
             fig, "Monthly Income, Expenses, and Balance Overview"
         )
+
         fig.update_layout(
             barmode="group",
             yaxis=dict(title="Amount (€)"),
-            hovermode="x unified",  # Show all traces in hover
-            xaxis=dict(
-                title="",
-                tickformat="%b %Y",  # Show month and year in x-axis
-            ),
+            hovermode="closest",
         )
 
         return fig
@@ -1209,7 +1245,7 @@ class ChartFactory:
         is_income: bool = False,
     ) -> go.Figure:
         """
-        Create a stacked bar chart for expenses or income by category.
+        Create a stacked bar chart with a single hover text per month and no embedded text.
 
         Args:
             df_stacked: DataFrame with stacked data
@@ -1250,37 +1286,115 @@ class ChartFactory:
         if len(colors) < len(unique_categories):
             colors = colors * (len(unique_categories) // len(colors) + 1)
 
-        fig = go.Figure()
+        # Create color map for categories
+        color_map = dict(zip(unique_categories, colors))
 
         # Get all months for consistent x-axis
         all_months = sorted(df_stacked["Month"].unique().to_list())
 
-        for category, color in zip(unique_categories, colors):
-            filtered = df_stacked.filter(pl.col("Category") == category)
+        # Format months for display
+        formatted_months = []
+        for month_str in all_months:
+            year = month_str.split("-")[0]
+            month_num = int(month_str.split("-")[1])
+            month_name = datetime(2000, month_num, 1).strftime("%b")
+            formatted_months.append(f"{month_name} {year}")
 
-            # Create a dict for easy month lookup
-            values_by_month = {
-                row["Month"]: row[value_column] for row in filtered.rows(named=True)
-            }
+        # Create a mapping between displayed months and actual month values
+        month_mapping = dict(zip(formatted_months, all_months))
 
-            # Create y-values for all months (with 0 for missing months)
-            y_values = [values_by_month.get(month, 0) for month in all_months]
+        # Create monthly data structure
+        monthly_data = {}
+        for month_display, month_raw in zip(formatted_months, all_months):
+            month_df = df_stacked.filter(pl.col("Month") == month_raw)
+            total = month_df[value_column].sum()
 
+            # Get category data sorted by value
+            cat_data = []
+            for category in unique_categories:
+                cat_df = month_df.filter(pl.col("Category") == category)
+                if len(cat_df) > 0:
+                    value = cat_df[value_column].sum()
+                    if value > 0:  # Only include categories with values
+                        cat_data.append(
+                            {
+                                "category": category,
+                                "value": value,
+                                "color": color_map[category],
+                            }
+                        )
+
+            # Sort by value (largest first)
+            cat_data.sort(key=lambda x: x["value"], reverse=True)
+
+            monthly_data[month_display] = {"total": total, "categories": cat_data}
+
+        # Create the figure
+        fig = go.Figure()
+
+        # Pre-compute hover texts for each month
+        hover_texts = {}
+        for month in formatted_months:
+            month_text = f"<b>{month}: {monthly_data[month]['total']:,.2f}€</b><br>"
+            for cat_info in monthly_data[month]["categories"]:
+                month_text += f"<span style='color:{cat_info['color']}; font-size:16px;'>■</span> {cat_info['category']}: {cat_info['value']:,.2f}€<br>"
+            hover_texts[month] = month_text
+
+        # Just add an invisible separate trace for hover (will appear above all bars)
+        for month_idx, month in enumerate(formatted_months):
             fig.add_trace(
-                go.Bar(
-                    x=all_months,
-                    y=y_values,
-                    name=category,
-                    marker_color=color,
-                    hovertemplate="%{x}<br>%{y:,.2f} €<extra></extra>",
+                go.Scatter(
+                    x=[month],
+                    y=[monthly_data[month]["total"]],  # Place at the top of the stack
+                    mode="markers",
+                    marker=dict(opacity=0, size=1),
+                    hoverinfo="text",
+                    hovertext=hover_texts[month],
+                    showlegend=False,
                 )
             )
 
+        # For each category, add a trace to the stacked bar
+        for i, category in enumerate(unique_categories):
+            values = []
+
+            for month in formatted_months:
+                # Get this category's value
+                cat_value = 0
+                for cat in monthly_data[month]["categories"]:
+                    if cat["category"] == category:
+                        cat_value = cat["value"]
+                        break
+
+                values.append(cat_value)
+
+            # Add the trace with no hover
+            fig.add_trace(
+                go.Bar(
+                    x=formatted_months,
+                    y=values,
+                    name=category,
+                    marker_color=colors[i],
+                    hoverinfo="none",  # No hover info
+                )
+            )
+
+        # Style the figure
         fig = self.chart_styler.apply_styling(fig, title)
+
+        # Set layout properties
         fig.update_layout(
             barmode="stack",
             yaxis=dict(title="Amount (€)"),
-            hovermode="x unified",
+            hovermode="closest",  # Use closest mode for best single hover behavior
+            # Adjust legend positioning
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.2,
+                xanchor="center",
+                x=0.5,
+            ),
         )
 
         return fig

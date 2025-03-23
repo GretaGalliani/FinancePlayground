@@ -96,7 +96,7 @@ savings_types:
 # CATEGORIES
 ###############
 # Valid categories for expenses
-valid_expense_categories:
+valid_expenses_categories:
   - "Altro"
   - "Benessere Personale"
   - "Cibo"
