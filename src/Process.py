@@ -1,3 +1,4 @@
+#!/filepath: src/process.py
 """
 Process module for standardizing and transforming financial data.
 
@@ -7,735 +8,855 @@ generates all intermediate datasets required for visualization.
 """
 
 import os
+import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Any, cast
 
-import pandera.polars as pa
 import polars as pl
-from pandera.typing.polars import DataFrame
+import pydantic
+from pydantic import BaseModel, Field, validator
+
+from config import Config
 
 
-class ExpenseIncomeSchema(pa.DataFrameModel):
-    """Schema for standardized expense and income data."""
+class FinancialRecord(BaseModel):
+    """Base model for financial records validation."""
 
-    Date: pl.Datetime
-    Description: pl.String
-    Category: pl.String  # We'll handle null categories in our processing logic
-    Value: pl.Float64
+    Date: datetime
+    Description: str
+    Category: str
+    Value: float
 
     class Config:
-        coerce = True  # Attempt to coerce types when possible
-        strict = False  # Don't be too strict with validation
+        """Pydantic configuration."""
+
+        arbitrary_types_allowed = True
 
 
-class SavingsSchema(pa.DataFrameModel):
-    """Schema for standardized savings data."""
+class SavingsRecord(FinancialRecord):
+    """Model for savings records validation."""
 
-    Date: pl.Datetime
-    Description: pl.String
-    Category: pl.String
-    CategoryType: pl.String
-    Value: pl.Float64
+    CategoryType: str
 
 
-class Process:
+@dataclass
+class ProcessingStats:
+    """Statistics from data processing operations."""
+
+    source_rows: int
+    processed_rows: int
+    invalid_rows: int = 0
+    skipped_categories: List[str] = None
+    errors: List[str] = None
+
+    def __post_init__(self) -> None:
+        """Initialize default values for lists."""
+        if self.skipped_categories is None:
+            self.skipped_categories = []
+        if self.errors is None:
+            self.errors = []
+
+
+class SchemaValidator:
     """
-    A class for processing and standardizing financial data.
-
-    This class transforms raw financial data from the DataWrangler into
-    standardized formats, applies consistent schema validation, and
-    calculates aggregate metrics. It also generates all necessary
-    intermediate datasets for visualization.
-
-    Attributes:
-        config: Configuration object containing mappings and settings
+    Validates and converts financial data to standard schema.
+    
+    This class is responsible for validating raw data against defined schemas
+    and converting it to standardized formats.
     """
 
-    def __init__(self, config, logger):
+    def __init__(self, logger: logging.Logger):
         """
-        Initialize the Process class with configuration and logger.
-
+        Initialize the schema validator.
+        
         Args:
-            config: Configuration object containing column mappings and settings
-            logger: Logger instance from the main application
+            logger: Logger instance for logging validation events
         """
-        self.config = config
-        self.logger = logger.getChild("Process")
-        self.logger.info("Process initialized")
-        self._ensure_output_folder()
+        self.logger = logger.getChild("SchemaValidator")
 
-    def _ensure_output_folder(self):
-        """Create the output folder if it doesn't exist."""
-        output_folder = self.config.get("output_folder")
-        os.makedirs(output_folder, exist_ok=True)
-
-    @pa.check_types
-    def process_expense_income_data(
-        self, df: DataFrame, data_type: str = "expenses"
-    ) -> DataFrame[ExpenseIncomeSchema]:
+    def validate_expense_income(
+        self, df: pl.DataFrame
+    ) -> Tuple[pl.DataFrame, List[str]]:
         """
-        Process expense or income data into a standardized format.
-
+        Validate expense/income data against schema.
+        
         Args:
             df: Raw expense or income DataFrame
-            data_type: Type of data ("expenses" or "income")
-
+            
         Returns:
-            DataFrame[ExpenseIncomeSchema]: Standardized DataFrame with consistent schema
+            Tuple containing:
+                - pl.DataFrame: Validated DataFrame
+                - List[str]: List of validation errors
         """
-        # Drop "Mese" column if it exists
-        if "Mese" in df.columns:
-            df = df.drop("Mese")
+        errors = []
+        validated_rows = []
+        
+        for row in df.iter_rows(named=True):
+            try:
+                # Convert to dict and validate with pydantic
+                validated = FinancialRecord(
+                    Date=row["Date"],
+                    Description=row["Description"],
+                    Category=row["Category"],
+                    Value=float(row["Value"])
+                )
+                validated_rows.append(validated.dict())
+            except pydantic.ValidationError as e:
+                errors.append(f"Row validation error: {e}")
+                self.logger.warning(f"Validation error for row: {row}, error: {e}")
+        
+        if not validated_rows:
+            self.logger.error("No valid rows after validation")
+            return pl.DataFrame(), errors
+        
+        return pl.DataFrame(validated_rows), errors
 
-        # Get the appropriate column mapping
-        column_mapping = self.config.get(f"{data_type}_column_mapping")
-
-        if not column_mapping:
-            raise ValueError(f"Missing column mapping for {data_type}")
-
-        # Convert date column to a sensible format
-        df_date = self._convert_to_date(df, "Data")
-
-        # Clean string columns
-        df_string = self._clean_string_columns(df_date)
-
-        # Rename columns according to mapping
-        df_renamed = df_string.rename(column_mapping)
-
-        # Validate and fix categories
-        df_with_valid_categories = self._validate_and_fix_categories(
-            df_renamed, data_type
-        )
-
-        # Make sure we don't have a month/mese column in the output
-        if "Mese" in df_with_valid_categories.columns:
-            df_with_valid_categories = df_with_valid_categories.drop("Mese")
-
-        return df_with_valid_categories
-
-    @pa.check_types
-    def process_savings_data(self, df: DataFrame) -> DataFrame[SavingsSchema]:
+    def validate_savings(
+        self, df: pl.DataFrame
+    ) -> Tuple[pl.DataFrame, List[str]]:
         """
-        Process savings data into a standardized format.
-
+        Validate savings data against schema.
+        
         Args:
             df: Raw savings DataFrame
-
+            
         Returns:
-            DataFrame[SavingsSchema]: Standardized DataFrame with consistent schema
+            Tuple containing:
+                - pl.DataFrame: Validated DataFrame
+                - List[str]: List of validation errors
         """
-        # Drop "Mese" column if it exists
-        if "Mese" in df.columns:
-            df = df.drop("Mese")
-
-        # Get column mapping from config
-        column_mapping = self.config.get("savings_column_mapping")
-
-        if not column_mapping:
-            raise ValueError("Missing savings column mapping in configuration")
-
-        # Convert date column to a sensible format
-        df_date = self._convert_to_date(df, "Data")
-
-        # Clean string columns
-        df_clean = self._clean_string_columns(df_date)
-
-        # Rename columns according to mapping
-        df_renamed = df_clean.rename(column_mapping)
-
-        # Validate and fix categories for savings
-        df_with_valid_categories = self._validate_and_fix_categories(
-            df_renamed, "savings"
-        )
-
-        # Make sure we don't have a month/mese column in the output
-        if "Mese" in df_with_valid_categories.columns:
-            df_with_valid_categories = df_with_valid_categories.drop("Mese")
-
-        return df_with_valid_categories
-
-    def generate_all_datasets(self, df_expenses, df_income, df_savings):
-        """
-        Generate all intermediate datasets for visualization.
-
-        Args:
-            df_expenses: Processed expense DataFrame
-            df_income: Processed income DataFrame
-            df_savings: Processed savings DataFrame
-        """
-        self.logger.info("Generating all datasets for visualization...")
-
-        # Calculate date range - use all available data
-        min_date = min(
-            df_expenses["Date"].min(),
-            df_income["Date"].min(),
-            df_savings["Date"].min() if df_savings is not None else datetime.now(),
-        )
-        max_date = max(
-            df_expenses["Date"].max(),
-            df_income["Date"].max(),
-            df_savings["Date"].max() if df_savings is not None else datetime.now(),
-        )
-
-        # Generate income and expense datasets
-        self.generate_monthly_summary(df_expenses, df_income, min_date, max_date)
-        self.generate_expense_breakdown(df_expenses, min_date, max_date)
-        self.generate_income_breakdown(df_income, min_date, max_date)
-
-        # Generate savings datasets
-        if df_savings is not None:
-            df_savings_monthly = self.calculate_savings_totals(df_savings)
-            self.generate_savings_datasets(
-                df_savings, df_savings_monthly, min_date, max_date
-            )
-
-        self.logger.info("All datasets generated successfully")
-
-    def generate_monthly_summary(self, df_expenses, df_income, start_date, end_date):
-        """
-        Generate monthly summary datasets for expenses and income.
-
-        Args:
-            df_expenses: Processed expense DataFrame
-            df_income: Processed income DataFrame
-            start_date: Start date for the summary
-            end_date: End date for the summary
-        """
-        # Monthly expenses
-        monthly_expenses = (
-            df_expenses.filter(
-                (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
-            )
-            .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
-            .groupby("Month")
-            .agg(pl.sum("Value").alias("Expenses"))
-            .sort("Month")
-        )
-        self._save_dataset(monthly_expenses, "monthly_expenses_path")
-
-        # Monthly income
-        monthly_income = (
-            df_income.filter(
-                (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
-            )
-            .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
-            .groupby("Month")
-            .agg(pl.sum("Value").alias("Income"))
-            .sort("Month")
-        )
-        self._save_dataset(monthly_income, "monthly_income_path")
-
-        # Combined monthly summary
-        monthly_summary = monthly_expenses.join(
-            monthly_income, on="Month", how="outer"
-        ).fill_null(0)
-
-        # Calculate balance
-        monthly_summary = monthly_summary.with_columns(
-            (pl.col("Income") - pl.col("Expenses")).alias("Balance")
-        )
-
-        self._save_dataset(monthly_summary, "monthly_summary_path")
-
-    def generate_expense_breakdown(self, df_expenses, start_date, end_date):
-        """
-        Generate expense breakdown datasets by category.
-
-        Args:
-            df_expenses: Processed expense DataFrame
-            start_date: Start date for the summary
-            end_date: End date for the summary
-        """
-        # Expenses by category
-        expenses_by_category = (
-            df_expenses.filter(
-                (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
-            )
-            .groupby("Category")
-            .agg(pl.sum("Value").alias("Total"))
-            .sort("Total", descending=True)
-        )
-        self._save_dataset(expenses_by_category, "expenses_by_category_path")
-
-        # Stacked expenses by month and category
-        expenses_stacked = (
-            df_expenses.filter(
-                (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
-            )
-            .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
-            .groupby(["Month", "Category"])
-            .agg(pl.sum("Value").alias("Expenses"))
-            .sort(["Month", "Category"])
-        )
-        self._save_dataset(expenses_stacked, "expenses_stacked_path")
-
-    def generate_income_breakdown(self, df_income, start_date, end_date):
-        """
-        Generate income breakdown datasets by category.
-
-        Args:
-            df_income: Processed income DataFrame
-            start_date: Start date for the summary
-            end_date: End date for the summary
-        """
-        # Income by category
-        income_by_category = (
-            df_income.filter(
-                (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
-            )
-            .groupby("Category")
-            .agg(pl.sum("Value").alias("Total"))
-            .sort("Total", descending=True)
-        )
-        self._save_dataset(income_by_category, "income_by_category_path")
-
-        # Stacked income by month and category
-        income_stacked = (
-            df_income.filter(
-                (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
-            )
-            .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
-            .groupby(["Month", "Category"])
-            .agg(pl.sum("Value").alias("Income"))
-            .sort(["Month", "Category"])
-        )
-        self._save_dataset(income_stacked, "income_stacked_path")
-
-    def calculate_savings_totals(self, df: DataFrame) -> pl.DataFrame:
-        """
-        Calculate monthly running totals for each savings category and type.
-
-        Args:
-            df: Processed savings DataFrame
-
-        Returns:
-            pl.DataFrame: Monthly aggregated savings with running totals
-        """
-        # Drop "Mese" column if it exists
-        if "Mese" in df.columns:
-            df = df.drop("Mese")
-
-        if len(df) == 0:
-            return pl.DataFrame(
-                {
-                    "Month": [],
-                    "Category": [],
-                    "CategoryType": [],
-                    "MonthlyValue": [],
-                    "TotalValue": [],
-                    "TotalSavings": [],
-                    "TotalAllocated": [],
-                    "TotalSpent": [],
-                }
-            )
-
-        # First, add the Month column and map the transaction types correctly
-        df_with_month = df.with_columns(
-            [
-                pl.col("Date").dt.strftime("%Y-%m").alias("Month"),
-                # Determine AllocationType based on CategoryType
-                pl.when(pl.col("CategoryType") == "Accantonamento")
-                .then(pl.lit("Allocation"))
-                .otherwise(pl.lit("Savings"))
-                .alias("AllocationType"),
-            ]
-        )
-
-        # Add an IsAllocation field for internal use (needed for calculations)
-        df_with_month = df_with_month.with_columns(
-            pl.when(pl.col("AllocationType") == "Allocation")
-            .then(pl.lit(True))
-            .otherwise(pl.lit(False))
-            .alias("IsAllocation")
-        )
-
-        # Group by month, category, category type, and allocation type
-        monthly_aggregates = df_with_month.groupby(
-            ["Month", "Category", "CategoryType", "AllocationType"]
-        ).agg(pl.sum("Value").alias("MonthlyValue"))
-
-        # Process each Category-CategoryType-AllocationType group separately
-        # We'll build the results step by step
-        result_frames = []
-
-        # Get all unique combinations
-        unique_combinations = df_with_month.select(
-            pl.col("Category"), pl.col("CategoryType"), pl.col("AllocationType")
-        ).unique()
-
-        # For each combination, calculate running totals
-        for row in unique_combinations.iter_rows(named=True):
-            category = row["Category"]
-            category_type = row["CategoryType"]
-            allocation_type = row["AllocationType"]
-
-            # Filter data for this combination
-            filtered = monthly_aggregates.filter(
-                (pl.col("Category") == category)
-                & (pl.col("CategoryType") == category_type)
-                & (pl.col("AllocationType") == allocation_type)
-            ).sort("Month")
-
-            # If there's data for this combination
-            if len(filtered) > 0:
-                # Calculate running total
-                filtered_with_total = filtered.with_columns(
-                    pl.col("MonthlyValue").cum_sum().alias("TotalValue")
+        errors = []
+        validated_rows = []
+        
+        for row in df.iter_rows(named=True):
+            try:
+                # Convert to dict and validate with pydantic
+                validated = SavingsRecord(
+                    Date=row["Date"],
+                    Description=row["Description"],
+                    Category=row["Category"],
+                    CategoryType=row["CategoryType"],
+                    Value=float(row["Value"])
                 )
+                validated_rows.append(validated.dict())
+            except pydantic.ValidationError as e:
+                errors.append(f"Row validation error: {e}")
+                self.logger.warning(f"Validation error for row: {row}, error: {e}")
+        
+        if not validated_rows:
+            self.logger.error("No valid rows after validation")
+            return pl.DataFrame(), errors
+        
+        return pl.DataFrame(validated_rows), errors
 
-                # Add to results
-                result_frames.append(filtered_with_total)
 
-        # Combine all results
-        if result_frames:
-            all_results = pl.concat(result_frames)
-        else:
-            return pl.DataFrame(
-                {
-                    "Month": [],
-                    "Category": [],
-                    "CategoryType": [],
-                    "AllocationType": [],
-                    "MonthlyValue": [],
-                    "TotalValue": [],
-                    "TotalSavings": [],
-                    "TotalAllocated": [],
-                    "TotalSpent": [],
-                }
-            )
+class DataTransformer:
+    """
+    Transforms financial data between different formats.
+    
+    This class is responsible for converting data between different formats
+    and applying transformations to prepare data for analysis.
+    """
 
-        # Calculate key metrics by month
-        monthly_metrics = []
-
-        # Get all available months
-        all_months = all_results["Month"].unique().sort()
-
-        # Running totals
-        total_savings = 0.0
-        total_allocated = 0.0
-        total_spent = 0.0
-
-        for month in all_months:
-            # Get data for this month
-            month_data = df_with_month.filter(pl.col("Month") == month)
-
-            # 1. TOTAL SAVINGS - All Savings type category transactions (positive values)
-            savings_data = month_data.filter(
-                (pl.col("CategoryType") == "Risparmio") & (pl.col("Value") > 0)
-            )
-            month_savings = savings_data["Value"].sum() or 0.0
-            total_savings += month_savings
-
-            # 2. ALLOCATED FUNDS - All Allocation type category transactions (positive values)
-            # Only consider positive values for allocated funds (adding to allocations)
-            alloc_data = month_data.filter(
-                (pl.col("CategoryType") == "Accantonamento") & (pl.col("Value") > 0)
-            )
-            month_allocated = alloc_data["Value"].sum() or 0.0
-
-            # Subtract negative values for withdrawals from allocations
-            alloc_withdrawal_data = month_data.filter(
-                (pl.col("CategoryType") == "Accantonamento") & (pl.col("Value") < 0)
-            )
-            month_allocated_withdrawals = abs(
-                alloc_withdrawal_data["Value"].sum() or 0.0
-            )
-
-            # Adjust the total allocated funds
-            total_allocated = (
-                total_allocated + month_allocated - month_allocated_withdrawals
-            )
-
-            # 3. SPENT FUNDS - Only consider non-Accantonamento withdrawals
-            spent_data = month_data.filter(
-                (pl.col("CategoryType") != "Accantonamento") & (pl.col("Value") < 0)
-            )
-            month_spent = abs(
-                spent_data["Value"].sum() or 0.0
-            )  # Make positive for display
-            total_spent += month_spent
-
-            # Store monthly metrics
-            monthly_metrics.append(
-                {
-                    "Month": month,
-                    "TotalSavings": total_savings,
-                    "TotalAllocated": total_allocated,
-                    "TotalSpent": total_spent,
-                }
-            )
-
-        # Convert metrics to DataFrame
-        metrics_df = pl.DataFrame(monthly_metrics)
-
-        # Join metrics to the main results
-        final_results = all_results.join(metrics_df, on="Month", how="left")
-
-        # Fill nulls with zeros
-        final_results = final_results.with_columns(
-            [
-                pl.col("TotalSavings").fill_null(0.0),
-                pl.col("TotalAllocated").fill_null(0.0),
-                pl.col("TotalSpent").fill_null(0.0),
-            ]
-        )
-
-        return final_results
-
-    def generate_savings_datasets(
-        self, df_savings, df_savings_monthly, start_date, end_date
-    ):
+    def __init__(self, config: Config, logger: logging.Logger):
         """
-        Generate savings-related datasets for visualization.
-
+        Initialize the data transformer.
+        
         Args:
-            df_savings: Processed savings DataFrame
-            df_savings_monthly: Monthly savings totals DataFrame
-            start_date: Start date for the summary
-            end_date: End date for the summary
+            config: Application configuration
+            logger: Logger instance for logging transformation events
         """
-        # Filter data for the selected date range
-        df_savings_filtered = df_savings.filter(
-            (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
-        )
+        self.config = config
+        self.logger = logger.getChild("DataTransformer")
 
-        # Filter monthly data
-        start_month = datetime.strftime(start_date, "%Y-%m")
-        end_month = datetime.strftime(end_date, "%Y-%m")
-        df_monthly_filtered = df_savings_monthly.filter(
-            (pl.col("Month") >= start_month) & (pl.col("Month") <= end_month)
-        )
-
-        # 1. Savings metrics by month
-        savings_metrics = (
-            df_monthly_filtered.groupby("Month")
-            .agg(
-                pl.first("TotalSavings").alias("TotalSavings"),
-                pl.first("TotalAllocated").alias("TotalAllocated"),
-                pl.first("TotalSpent").alias("TotalSpent"),
-            )
-            .sort("Month")
-        )
-        self._save_dataset(savings_metrics, "savings_metrics_path")
-
-        # 2. Savings by category (last month)
-        last_month = df_monthly_filtered["Month"].max()
-        last_month_data = df_monthly_filtered.filter(pl.col("Month") == last_month)
-
-        category_totals = (
-            last_month_data.filter(pl.col("CategoryType") == "Risparmio")
-            .groupby("Category")
-            .agg(pl.sum("TotalValue").alias("Value"))
-        )
-        self._save_dataset(category_totals, "savings_by_category_path")
-
-        # 3. Allocation status data
-        # Prepare data for visualization
-        visualization_data = []
-
-        # Get all categories
-        categories = df_monthly_filtered["Category"].unique().to_list()
-
-        for category in categories:
-            # Determine category type (Risparmio or Accantonamento)
-            category_type_data = df_monthly_filtered.filter(
-                pl.col("Category") == category
-            )
-            category_type = (
-                category_type_data["CategoryType"][0]
-                if len(category_type_data) > 0
-                else "Unknown"
-            )
-
-            # Filter last month data for this category
-            category_data = last_month_data.filter(pl.col("Category") == category)
-
-            # Get positive transactions (additions)
-            positive_data = category_data.filter(pl.col("MonthlyValue") > 0)
-            if len(positive_data) > 0:
-                positive_sum = positive_data["MonthlyValue"].sum()
-                visualization_data.append(
-                    {
-                        "Category": category,
-                        "Type": (
-                            "Allocated"
-                            if category_type == "Accantonamento"
-                            else "Saved"
-                        ),
-                        "Value": positive_sum,
-                    }
-                )
-
-            # Get negative transactions (withdrawals/spending)
-            negative_data = category_data.filter(pl.col("MonthlyValue") < 0)
-            if len(negative_data) > 0:
-                negative_sum = abs(negative_data["MonthlyValue"].sum())
-                visualization_data.append(
-                    {
-                        "Category": category,
-                        "Type": (
-                            "Spent from Allocations"
-                            if category_type == "Accantonamento"
-                            else "Spent from Savings"
-                        ),
-                        "Value": negative_sum,
-                    }
-                )
-
-        # Convert to DataFrame and save
-        if visualization_data:
-            allocation_df = pl.DataFrame(visualization_data)
-            self._save_dataset(allocation_df, "savings_allocation_path")
-
-    def _save_dataset(self, df, config_key):
+    def standardize_date_format(self, df: pl.DataFrame, date_col: str = "Date") -> pl.DataFrame:
         """
-        Save a DataFrame to a CSV file.
-
-        Args:
-            df: DataFrame to save
-            config_key: Key in the configuration for the output path
-        """
-        if len(df) == 0:
-            self.logger.warning(f"Empty DataFrame for {config_key}, skipping save")
-            return
-
-        path = self.config.get(config_key)
-        if not path:
-            self.logger.warning(f"Missing path configuration for {config_key}")
-            return
-
-        try:
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            df.write_csv(path)
-            self.logger.info(f"Saved dataset to {path}")
-        except Exception as e:
-            self.logger.error(f"Error saving dataset to {path}: {e}")
-
-    def _validate_and_fix_categories(
-        self, df: pl.DataFrame, data_type: str
-    ) -> pl.DataFrame:
-        """
-        Validate categories against the configured list and fix invalid ones.
-
-        Args:
-            df: DataFrame to validate
-            data_type: Type of data ("expenses" or "income")
-
-        Returns:
-            pl.DataFrame: DataFrame with validated categories
-        """
-        if "Category" not in df.columns:
-            self.logger.warning("No Category column found in the DataFrame")
-            return df
-
-        # Get valid categories from config
-        valid_categories_key = f"valid_{data_type}_categories"
-        valid_categories = self.config.get(valid_categories_key)
-        default_category = self.config.get("default_category")
-
-        # Check for null categories
-        null_count = df.filter(pl.col("Category").is_null()).height
-        if null_count > 0:
-            self.logger.warning(
-                f"Found {null_count} records with null categories. Using default category: {default_category}"
-            )
-
-        # Check for invalid categories
-        if valid_categories:
-            invalid_categories = df.filter(
-                ~pl.col("Category").is_null()
-                & ~pl.col("Category").is_in(valid_categories)
-            ).select(pl.col("Category").unique())
-
-            if len(invalid_categories) > 0:
-                invalid_list = invalid_categories["Category"].to_list()
-                self.logger.warning(
-                    f"Found invalid categories: {', '.join(invalid_list)}. Using default category: {default_category}"
-                )
-
-        # Replace null or invalid categories with default
-        if valid_categories:
-            df = df.with_columns(
-                pl.when(
-                    pl.col("Category").is_null()
-                    | ~pl.col("Category").is_in(valid_categories)
-                )
-                .then(pl.lit(default_category))
-                .otherwise(pl.col("Category"))
-                .alias("Category")
-            )
-        else:
-            # If no valid categories are defined, just replace nulls
-            df = df.with_columns(
-                pl.when(pl.col("Category").is_null())
-                .then(pl.lit(default_category))
-                .otherwise(pl.col("Category"))
-                .alias("Category")
-            )
-
-        return df
-
-    def _convert_to_date(
-        self, df: pl.DataFrame, date_col: str = "Data"
-    ) -> pl.DataFrame:
-        """
-        Convert a date column to datetime format.
-
+        Standardize date format in the DataFrame.
+        
         Args:
             df: DataFrame to process
-            date_col: Name of the date column to convert
-
+            date_col: Name of the date column
+            
         Returns:
-            pl.DataFrame: DataFrame with converted date column
+            pl.DataFrame: DataFrame with standardized date column
         """
         if date_col not in df.columns:
+            self.logger.warning(f"Date column '{date_col}' not found in DataFrame")
             return df
-
-        # Check the data type and format of the date column
+            
+        # Handle different date formats
         if df[date_col].dtype == pl.Utf8:
-            # Try multiple date formats
             try:
-                # First try DD/MM/YY format
-                if "/" in df[date_col][0]:
-                    return df.with_columns(
-                        pl.col(date_col)
-                        .str.strptime(pl.Datetime, format="%d/%m/%y")
-                        .alias(date_col)
-                    )
-                # Then try YYYY-MM-DD format
-                elif "-" in df[date_col][0]:
-                    return df.with_columns(
-                        pl.col(date_col)
-                        .str.strptime(pl.Datetime, format="%Y-%m-%d")
-                        .alias(date_col)
-                    )
-            except Exception:
-                # If specific formats fail, try a more general approach
-                return df.with_columns(
-                    pl.col(date_col).str.to_datetime().alias(date_col)
-                )
+                # Try multiple date formats
+                if any(row and "/" in row for row in df[date_col] if isinstance(row, str)):
+                    return df.with_columns(pl.col(date_col).str.strptime(pl.Datetime, "%d/%m/%y").alias(date_col))
+                elif any(row and "-" in row for row in df[date_col] if isinstance(row, str)):
+                    return df.with_columns(pl.col(date_col).str.strptime(pl.Datetime, "%Y-%m-%d").alias(date_col))
+                else:
+                    # General conversion
+                    return df.with_columns(pl.col(date_col).str.to_datetime().alias(date_col))
+            except Exception as e:
+                self.logger.error(f"Error converting date column: {e}")
+                # Fallback to general conversion
+                return df.with_columns(pl.col(date_col).str.to_datetime().alias(date_col))
         elif df[date_col].dtype == pl.Date:
             # Convert Date to Datetime
             return df.with_columns(pl.col(date_col).cast(pl.Datetime).alias(date_col))
-
+            
         return df
 
-    def _clean_string_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+    def normalize_categories(
+        self, df: pl.DataFrame, valid_categories: List[str], default_category: str
+    ) -> pl.DataFrame:
         """
-        Clean string columns by removing leading/trailing whitespace.
+        Normalize categories in the DataFrame.
+        
+        Args:
+            df: DataFrame to process
+            valid_categories: List of valid category names
+            default_category: Default category to use for invalid categories
+            
+        Returns:
+            pl.DataFrame: DataFrame with normalized categories
+        """
+        if "Category" not in df.columns:
+            self.logger.warning("No Category column found in DataFrame")
+            return df
+            
+        # Check for null categories
+        null_count = df.filter(pl.col("Category").is_null()).height
+        if null_count > 0:
+            self.logger.warning(f"Found {null_count} records with null categories. Using default: {default_category}")
+            
+        # Replace null or invalid categories with default
+        return df.with_columns(
+            pl.when(
+                pl.col("Category").is_null() | ~pl.col("Category").is_in(valid_categories)
+            )
+            .then(pl.lit(default_category))
+            .otherwise(pl.col("Category"))
+            .alias("Category")
+        )
 
+    def clean_string_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Clean string columns by removing whitespace.
+        
         Args:
             df: DataFrame to clean
-
+            
         Returns:
             pl.DataFrame: DataFrame with cleaned string columns
         """
         # Get all string columns
         string_cols = [col for col in df.columns if df[col].dtype == pl.Utf8]
-
+        
         if not string_cols:
             return df
-
+            
         # Apply string cleaning to all string columns
         return df.with_columns([pl.col(col).str.strip() for col in string_cols])
+
+    def add_month_column(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Add a Month column based on the Date column.
+        
+        Args:
+            df: DataFrame to process
+            
+        Returns:
+            pl.DataFrame: DataFrame with Month column added
+        """
+        if "Date" not in df.columns:
+            self.logger.warning("No Date column found in DataFrame")
+            return df
+            
+        return df.with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
+
+
+class AnalyticsGenerator:
+    """
+    Generates analytical datasets for visualization.
+    
+    This class is responsible for creating derived datasets for
+    visualization and analysis from processed financial data.
+    """
+
+    def __init__(self, config: Config, logger: logging.Logger):
+        """
+        Initialize the analytics generator.
+        
+        Args:
+            config: Application configuration
+            logger: Logger instance for logging analytics events
+        """
+        self.config = config
+        self.logger = logger.getChild("AnalyticsGenerator")
+        self.output_folder = config.get("output_folder", "output")
+        self._ensure_output_folder()
+
+    def _ensure_output_folder(self) -> None:
+        """Create the output folder if it doesn't exist."""
+        os.makedirs(self.output_folder, exist_ok=True)
+
+    def monthly_summary(
+        self, df_expenses: pl.DataFrame, df_income: pl.DataFrame, start_date: datetime, end_date: datetime
+    ) -> pl.DataFrame:
+        """
+        Generate monthly summary of expenses and income.
+        
+        Args:
+            df_expenses: Processed expense DataFrame
+            df_income: Processed income DataFrame
+            start_date: Start date for the summary
+            end_date: End date for the summary
+            
+        Returns:
+            pl.DataFrame: Monthly summary DataFrame
+        """
+        # Filter by date range
+        expenses_filtered = df_expenses.filter(
+            (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
+        )
+        income_filtered = df_income.filter(
+            (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
+        )
+        
+        # Calculate monthly expenses
+        monthly_expenses = (
+            expenses_filtered
+            .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
+            .groupby("Month")
+            .agg(pl.sum("Value").alias("Expenses"))
+            .sort("Month")
+        )
+        
+        # Calculate monthly income
+        monthly_income = (
+            income_filtered
+            .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
+            .groupby("Month")
+            .agg(pl.sum("Value").alias("Income"))
+            .sort("Month")
+        )
+        
+        # Join expenses and income
+        monthly_summary = monthly_expenses.join(
+            monthly_income, on="Month", how="outer"
+        ).fill_null(0)
+        
+        # Calculate balance
+        monthly_summary = monthly_summary.with_columns(
+            (pl.col("Income") - pl.col("Expenses")).alias("Balance")
+        )
+        
+        return monthly_summary
+
+    def category_breakdown(
+        self, df: pl.DataFrame, start_date: datetime, end_date: datetime, value_column: str = "Value"
+    ) -> pl.DataFrame:
+        """
+        Generate breakdown of values by category.
+        
+        Args:
+            df: DataFrame to analyze
+            start_date: Start date for the analysis
+            end_date: End date for the analysis
+            value_column: Name of the value column
+            
+        Returns:
+            pl.DataFrame: Category breakdown DataFrame
+        """
+        return (
+            df.filter((pl.col("Date") >= start_date) & (pl.col("Date") <= end_date))
+            .groupby("Category")
+            .agg(pl.sum(value_column).alias("Total"))
+            .sort("Total", descending=True)
+        )
+
+    def time_series_by_category(
+        self, df: pl.DataFrame, start_date: datetime, end_date: datetime, 
+        value_column: str = "Value", output_column: str = "Value"
+    ) -> pl.DataFrame:
+        """
+        Generate time series data by category.
+        
+        Args:
+            df: DataFrame to analyze
+            start_date: Start date for the analysis
+            end_date: End date for the analysis
+            value_column: Name of the input value column
+            output_column: Name of the output value column
+            
+        Returns:
+            pl.DataFrame: Time series DataFrame
+        """
+        return (
+            df.filter((pl.col("Date") >= start_date) & (pl.col("Date") <= end_date))
+            .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month"))
+            .groupby(["Month", "Category"])
+            .agg(pl.sum(value_column).alias(output_column))
+            .sort(["Month", "Category"])
+        )
+
+    def calculate_savings_metrics(self, df_savings: pl.DataFrame) -> pl.DataFrame:
+        """
+        Calculate savings metrics by month.
+        
+        Args:
+            df_savings: Processed savings DataFrame
+            
+        Returns:
+            pl.DataFrame: Savings metrics DataFrame
+        """
+        if len(df_savings) == 0:
+            self.logger.warning("No savings data available for metrics calculation")
+            return pl.DataFrame(
+                schema={
+                    "Month": pl.Utf8,
+                    "TotalSavings": pl.Float64,
+                    "TotalAllocated": pl.Float64,
+                    "TotalSpent": pl.Float64,
+                }
+            )
+            
+        # Add Month column if not present
+        if "Month" not in df_savings.columns:
+            df_savings = df_savings.with_columns(
+                pl.col("Date").dt.strftime("%Y-%m").alias("Month")
+            )
+            
+        # Add allocation type based on category type
+        df_processed = df_savings.with_columns(
+            pl.when(pl.col("CategoryType") == "Accantonamento")
+            .then(pl.lit("Allocation"))
+            .otherwise(pl.lit("Savings"))
+            .alias("AllocationType")
+        )
+        
+        # Calculate metrics by month
+        all_months = sorted(df_processed["Month"].unique().to_list())
+        metrics = []
+        
+        # Running totals
+        total_savings = 0.0
+        total_allocated = 0.0
+        total_spent = 0.0
+        
+        for month in all_months:
+            # Get data for this month
+            month_data = df_processed.filter(pl.col("Month") == month)
+            
+            # Calculate savings (positive values in Risparmio categories)
+            month_savings = month_data.filter(
+                (pl.col("CategoryType") == "Risparmio") & (pl.col("Value") > 0)
+            )["Value"].sum() or 0.0
+            total_savings += month_savings
+            
+            # Calculate allocations (positive values in Accantonamento categories)
+            month_allocated = month_data.filter(
+                (pl.col("CategoryType") == "Accantonamento") & (pl.col("Value") > 0)
+            )["Value"].sum() or 0.0
+            
+            # Calculate withdrawals from allocations
+            month_allocated_withdrawals = abs(
+                month_data.filter(
+                    (pl.col("CategoryType") == "Accantonamento") & (pl.col("Value") < 0)
+                )["Value"].sum() or 0.0
+            )
+            
+            # Update total allocated funds
+            total_allocated = total_allocated + month_allocated - month_allocated_withdrawals
+            
+            # Calculate spent funds (withdrawals from non-Accantonamento categories)
+            month_spent = abs(
+                month_data.filter(
+                    (pl.col("CategoryType") != "Accantonamento") & (pl.col("Value") < 0)
+                )["Value"].sum() or 0.0
+            )
+            total_spent += month_spent
+            
+            # Store monthly metrics
+            metrics.append({
+                "Month": month,
+                "TotalSavings": total_savings,
+                "TotalAllocated": total_allocated,
+                "TotalSpent": total_spent,
+            })
+            
+        return pl.DataFrame(metrics)
+
+    def savings_allocation_status(
+        self, df_savings_metrics: pl.DataFrame, df_savings: pl.DataFrame
+    ) -> pl.DataFrame:
+        """
+        Generate allocation status for savings categories.
+        
+        Args:
+            df_savings_metrics: Savings metrics DataFrame
+            df_savings: Processed savings DataFrame
+            
+        Returns:
+            pl.DataFrame: Allocation status DataFrame
+        """
+        if len(df_savings_metrics) == 0 or len(df_savings) == 0:
+            self.logger.warning("No savings data available for allocation status")
+            return pl.DataFrame(
+                schema={
+                    "Category": pl.Utf8,
+                    "Type": pl.Utf8,
+                    "Value": pl.Float64,
+                }
+            )
+            
+        # Get the latest month
+        last_month = df_savings_metrics["Month"].max()
+        
+        # Filter savings data for the latest month
+        monthly_data = df_savings.filter(
+            pl.col("Month") == last_month if "Month" in df_savings.columns 
+            else pl.col("Date").dt.strftime("%Y-%m") == last_month
+        )
+        
+        if len(monthly_data) == 0:
+            return pl.DataFrame(
+                schema={
+                    "Category": pl.Utf8,
+                    "Type": pl.Utf8,
+                    "Value": pl.Float64,
+                }
+            )
+            
+        # Prepare visualization data
+        allocation_data = []
+        
+        # Get all categories
+        categories = monthly_data["Category"].unique().to_list()
+        
+        for category in categories:
+            # Get category data
+            category_data = monthly_data.filter(pl.col("Category") == category)
+            category_type = category_data["CategoryType"][0] if len(category_data) > 0 else "Unknown"
+            
+            # Process positive transactions (additions)
+            positive_data = category_data.filter(pl.col("Value") > 0)
+            if len(positive_data) > 0:
+                positive_sum = positive_data["Value"].sum()
+                allocation_data.append({
+                    "Category": category,
+                    "Type": "Allocated" if category_type == "Accantonamento" else "Saved",
+                    "Value": positive_sum,
+                })
+                
+            # Process negative transactions (withdrawals)
+            negative_data = category_data.filter(pl.col("Value") < 0)
+            if len(negative_data) > 0:
+                negative_sum = abs(negative_data["Value"].sum())
+                allocation_data.append({
+                    "Category": category,
+                    "Type": "Spent from Allocations" if category_type == "Accantonamento" else "Spent from Savings",
+                    "Value": negative_sum,
+                })
+                
+        return pl.DataFrame(allocation_data) if allocation_data else pl.DataFrame(
+            schema={
+                "Category": pl.Utf8,
+                "Type": pl.Utf8,
+                "Value": pl.Float64,
+            }
+        )
+
+
+class FileManager:
+    """
+    Manages file operations for datasets.
+    
+    This class is responsible for saving datasets to files and managing
+    file paths for the application.
+    """
+
+    def __init__(self, config: Config, logger: logging.Logger):
+        """
+        Initialize the file manager.
+        
+        Args:
+            config: Application configuration
+            logger: Logger instance for logging file operations
+        """
+        self.config = config
+        self.logger = logger.getChild("FileManager")
+        self.output_folder = config.get("output_folder", "output")
+        os.makedirs(self.output_folder, exist_ok=True)
+
+    def save_dataset(self, df: pl.DataFrame, config_key: str) -> bool:
+        """
+        Save a DataFrame to a CSV file.
+        
+        Args:
+            df: DataFrame to save
+            config_key: Key in the configuration for the file path
+            
+        Returns:
+            bool: True if saved successfully, False otherwise
+        """
+        if len(df) == 0:
+            self.logger.warning(f"Empty DataFrame for {config_key}, skipping save")
+            return False
+            
+        path = self.config.get(config_key)
+        if not path:
+            self.logger.warning(f"Missing path configuration for {config_key}")
+            return False
+            
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Round all float columns to 2 decimal places before saving
+            df_to_save = df.clone()
+            for col in df.columns:
+                if df[col].dtype in (pl.Float32, pl.Float64):
+                    df_to_save = df_to_save.with_columns(pl.col(col).round(2).alias(col))
+                    
+            # Save to CSV with proper floating point precision
+            df_to_save.write_csv(path, float_precision=2)
+            self.logger.info(f"Saved dataset to {path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving dataset to {path}: {e}")
+            return False
+
+
+class Process:
+    """
+    Main class for processing and standardizing financial data.
+    
+    This class coordinates the transformation of raw financial data into
+    standardized formats, applies consistent schema validation, and
+    calculates aggregate metrics for visualization.
+    """
+
+    def __init__(self, config: Config, logger: logging.Logger):
+        """
+        Initialize the Process class with configuration and logger.
+        
+        Args:
+            config: Configuration object containing mappings and settings
+            logger: Logger instance from the main application
+        """
+        self.config = config
+        self.logger = logger.getChild("Process")
+        self.logger.info("Process initialized")
+        
+        # Initialize components
+        self.schema_validator = SchemaValidator(logger)
+        self.data_transformer = DataTransformer(config, logger)
+        self.analytics_generator = AnalyticsGenerator(config, logger)
+        self.file_manager = FileManager(config, logger)
+
+    def process_expense_income_data(
+        self, df: pl.DataFrame, data_type: str = "expenses"
+    ) -> pl.DataFrame:
+        """
+        Process expense or income data into a standardized format.
+        
+        Args:
+            df: Raw expense or income DataFrame
+            data_type: Type of data ("expenses" or "income")
+            
+        Returns:
+            pl.DataFrame: Standardized DataFrame with consistent schema
+        """
+        self.logger.info(f"Processing {data_type} data with {len(df)} rows")
+        
+        # Get the appropriate column mapping
+        column_mapping = self.config.get(f"{data_type}_column_mapping")
+        if not column_mapping:
+            error_msg = f"Missing column mapping for {data_type}"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        # Drop "Mese" column if it exists
+        if "Mese" in df.columns:
+            df = df.drop("Mese")
+            
+        # Clean and standardize data
+        df_cleaned = self.data_transformer.clean_string_columns(df)
+        df_date = self.data_transformer.standardize_date_format(df_cleaned, "Data")
+        
+        # Rename columns according to mapping
+        df_renamed = df_date.rename(column_mapping)
+        
+        # Validate categories
+        valid_categories = self.config.get(f"valid_{data_type}_categories", [])
+        default_category = self.config.get("default_category", "Altro")
+        
+        df_with_valid_categories = self.data_transformer.normalize_categories(
+            df_renamed, valid_categories, default_category
+        )
+        
+        # Validate data against schema
+        df_validated, errors = self.schema_validator.validate_expense_income(df_with_valid_categories)
+        
+        if errors:
+            self.logger.warning(f"Encountered {len(errors)} validation errors during {data_type} processing")
+            
+        # Make sure there's no month column in the output
+        if "Mese" in df_validated.columns:
+            df_validated = df_validated.drop("Mese")
+            
+        self.logger.info(f"Successfully processed {len(df_validated)} {data_type} records")
+        return df_validated
+
+    def process_savings_data(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Process savings data into a standardized format.
+        
+        Args:
+            df: Raw savings DataFrame
+            
+        Returns:
+            pl.DataFrame: Standardized DataFrame with consistent schema
+        """
+        self.logger.info(f"Processing savings data with {len(df)} rows")
+        
+        # Get column mapping from config
+        column_mapping = self.config.get("savings_column_mapping")
+        if not column_mapping:
+            error_msg = "Missing savings column mapping in configuration"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        # Drop "Mese" column if it exists
+        if "Mese" in df.columns:
+            df = df.drop("Mese")
+            
+        # Clean and standardize data
+        df_cleaned = self.data_transformer.clean_string_columns(df)
+        df_date = self.data_transformer.standardize_date_format(df_cleaned, "Data")
+        
+        # Rename columns according to mapping
+        df_renamed = df_date.rename(column_mapping)
+        
+        # Validate categories
+        valid_categories = self.config.get("valid_savings_categories", [])
+        default_category = self.config.get("default_category", "Varie")
+        
+        df_with_valid_categories = self.data_transformer.normalize_categories(
+            df_renamed, valid_categories, default_category
+        )
+        
+        # Validate data against schema
+        df_validated, errors = self.schema_validator.validate_savings(df_with_valid_categories)
+        
+        if errors:
+            self.logger.warning(f"Encountered {len(errors)} validation errors during savings processing")
+            
+        # Make sure there's no month column in the output
+        if "Mese" in df_validated.columns:
+            df_validated = df_validated.drop("Mese")
+            
+        self.logger.info(f"Successfully processed {len(df_validated)} savings records")
+        return df_validated
+
+    def generate_all_datasets(
+        self, df_expenses: pl.DataFrame, df_income: pl.DataFrame, df_savings: Optional[pl.DataFrame] = None
+    ) -> None:
+        """
+        Generate all intermediate datasets for visualization.
+        
+        Args:
+            df_expenses: Processed expense DataFrame
+            df_income: Processed income DataFrame
+            df_savings: Processed savings DataFrame (optional)
+        """
+        self.logger.info("Generating all datasets for visualization...")
+        
+        # Calculate date range - use all available data
+        min_date = min(
+            df_expenses["Date"].min(),
+            df_income["Date"].min(),
+            df_savings["Date"].min() if df_savings is not None and len(df_savings) > 0 else datetime.now(),
+        )
+        
+        max_date = max(
+            df_expenses["Date"].max(),
+            df_income["Date"].max(),
+            df_savings["Date"].max() if df_savings is not None and len(df_savings) > 0 else datetime.now(),
+        )
+        
+        self.logger.info(f"Generating datasets for date range: {min_date.date()} to {max_date.date()}")
+        
+        # Generate and save monthly summary
+        monthly_summary = self.analytics_generator.monthly_summary(
+            df_expenses, df_income, min_date, max_date
+        )
+        self.file_manager.save_dataset(monthly_summary, "monthly_summary_path")
+        
+        # Generate and save expenses summaries
+        monthly_expenses = monthly_summary.select(["Month", "Expenses"])
+        self.file_manager.save_dataset(monthly_expenses, "monthly_expenses_path")
+        
+        expenses_by_category = self.analytics_generator.category_breakdown(
+            df_expenses, min_date, max_date
+        )
+        self.file_manager.save_dataset(expenses_by_category, "expenses_by_category_path")
+        
+        expenses_stacked = self.analytics_generator.time_series_by_category(
+            df_expenses, min_date, max_date, "Value", "Expenses"
+        )
+        self.file_manager.save_dataset(expenses_stacked, "expenses_stacked_path")
+        
+        # Generate and save income summaries
+        monthly_income = monthly_summary.select(["Month", "Income"])
+        self.file_manager.save_dataset(monthly_income, "monthly_income_path")
+        
+        income_by_category = self.analytics_generator.category_breakdown(
+            df_income, min_date, max_date
+        )
+        self.file_manager.save_dataset(income_by_category, "income_by_category_path")
+        
+        income_stacked = self.analytics_generator.time_series_by_category(
+            df_income, min_date, max_date, "Value", "Income"
+        )
+        self.file_manager.save_dataset(income_stacked, "income_stacked_path")
+        
+        # Generate savings datasets if available
+        if df_savings is not None and len(df_savings) > 0:
+            # Ensure Month column exists
+            if "Month" not in df_savings.columns:
+                df_savings = self.data_transformer.add_month_column(df_savings)
+                
+            # Calculate and save savings metrics
+            savings_metrics = self.analytics_generator.calculate_savings_metrics(df_savings)
+            self.file_manager.save_dataset(savings_metrics, "savings_metrics_path")
+            
+            # Get last month data for category breakdown
+            if len(savings_metrics) > 0:
+                last_month = savings_metrics["Month"].max()
+                last_month_data = savings_metrics.filter(pl.col("Month") == last_month)
+                
+                # Generate savings category breakdown
+                savings_by_category = (
+                    df_savings.filter(
+                        (pl.col("CategoryType") == "Risparmio") & 
+                        (pl.col("Month") == last_month)
+                    )
+                    .groupby("Category")
+                    .agg(pl.sum("Value").alias("Value"))
+                )
+                self.file_manager.save_dataset(savings_by_category, "savings_by_category_path")
+                
+                # Generate allocation status
+                allocation_status = self.analytics_generator.savings_allocation_status(
+                    savings_metrics, df_savings
+                )
+                self.file_manager.save_dataset(allocation_status, "savings_allocation_path")
+        
+        self.logger.info("All datasets generated successfully")
+
+if __name__ == "__main__":
+    # Set up logger
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("process")

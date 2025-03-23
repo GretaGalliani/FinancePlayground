@@ -14,13 +14,13 @@ import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import polars as pl  # type: ignore
-from numbers_parser import Document  # type: ignore
+import polars as pl # pylint: disable=import-error
+from numbers_parser import Document  # pylint: disable=import-error
 
 from config import Config
 from models import ProcessingResult, SkippedRow
 
-
+# pylint: too-few-public-methods
 class NumbersDocumentReader:
     """
     Handles opening and reading Numbers documents.

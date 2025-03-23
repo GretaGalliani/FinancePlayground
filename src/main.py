@@ -11,6 +11,7 @@ import os
 import sys
 import traceback
 from pathlib import Path
+from typing import Dict, Optional, Tuple, Any, List, cast, Union
 
 import polars as pl
 
@@ -18,17 +19,18 @@ from config import Config
 from data_wrangler import DataWrangler
 from FinanceDashboard import FinanceDashboard
 from logger import create_logger
-from Process import Process
+from process import Process
+from models import ProcessingResult
 
 
-def setup_directories():
+def setup_directories() -> None:
     """Create necessary directories for the application."""
     os.makedirs("input", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
     os.makedirs("output", exist_ok=True)
 
 
-def log_error(logger, error_message, traceback_str):
+def log_error(logger: logging.Logger, error_message: str, traceback_str: str) -> None:
     """
     Log errors with traceback information.
 
@@ -41,7 +43,7 @@ def log_error(logger, error_message, traceback_str):
     logger.error(f"Traceback:\n{traceback_str}")
 
 
-def load_from_cache(file_path, logger, message=None):
+def load_from_cache(file_path: str, logger: logging.Logger, message: Optional[str] = None) -> Optional[pl.DataFrame]:
     """
     Try to load data from a cached CSV file.
 
@@ -53,6 +55,10 @@ def load_from_cache(file_path, logger, message=None):
     Returns:
         pl.DataFrame or None: DataFrame if loaded successfully, None otherwise
     """
+    if not file_path:
+        logger.warning("No file path provided for cache loading")
+        return None
+        
     if os.path.exists(file_path):
         if message:
             logger.info(message)
@@ -60,10 +66,12 @@ def load_from_cache(file_path, logger, message=None):
             return pl.read_csv(file_path)
         except Exception as e:
             logger.error(f"Error loading cached data from {file_path}: {e}")
+    else:
+        logger.debug(f"Cache file not found: {file_path}")
     return None
 
 
-def load_data(data_wrangler, config, logger):
+def load_data(data_wrangler: DataWrangler, config: Config, logger: logging.Logger) -> Dict[str, pl.DataFrame]:
     """
     Load data from Numbers file or cached CSVs.
 
@@ -82,7 +90,7 @@ def load_data(data_wrangler, config, logger):
     logger.info("Loading data from Numbers file...")
     try:
         result = data_wrangler.load_updated_file()
-        logger.info("Successfully loaded data from Numbers file")
+        logger.info(f"Successfully loaded data from Numbers file with {len(result.dataframes)} sheets")
 
         # Save skipped rows report if any rows were skipped
         if result.skipped_rows:
@@ -101,16 +109,21 @@ def load_data(data_wrangler, config, logger):
         logger.info("Attempting to load data from cached CSV files...")
 
         # Try to load from cached files
-        raw_dfs = {}
-        raw_paths = config.get("raw_paths")
+        raw_dfs: Dict[str, Optional[pl.DataFrame]] = {}
+        raw_paths = config.get("raw_paths", {})
+        
+        if not isinstance(raw_paths, dict):
+            logger.error("Invalid raw_paths configuration (not a dictionary)")
+            raise ValueError("Invalid raw_paths configuration")
+            
         raw_dfs["expenses"] = load_from_cache(
-            raw_paths.get("expenses"), logger, "Loading expenses from cache"
+            raw_paths.get("expenses", ""), logger, "Loading expenses from cache"
         )
         raw_dfs["income"] = load_from_cache(
-            raw_paths.get("income"), logger, "Loading income from cache"
+            raw_paths.get("income", ""), logger, "Loading income from cache"
         )
         raw_dfs["savings"] = load_from_cache(
-            raw_paths.get("savings"), logger, "Loading savings from cache"
+            raw_paths.get("savings", ""), logger, "Loading savings from cache"
         )
 
         # Check if we have the essential data
@@ -122,15 +135,22 @@ def load_data(data_wrangler, config, logger):
                 "Could not load essential data from either Numbers file or cache"
             )
 
-        return raw_dfs
+        # Cast to remove None from the dictionary values (we've already checked the essential ones)
+        return cast(Dict[str, pl.DataFrame], 
+                   {k: v for k, v in raw_dfs.items() if v is not None})
 
 
-def process_data(process, raw_dfs, config, logger):
+def process_data(
+    process_module: Process, 
+    raw_dfs: Dict[str, pl.DataFrame], 
+    config: Config, 
+    logger: logging.Logger
+) -> Tuple[pl.DataFrame, pl.DataFrame, Optional[pl.DataFrame]]:
     """
     Process the raw data into clean DataFrames.
 
     Args:
-        process: The Process instance
+        process_module: The Process instance
         raw_dfs: Dictionary of raw DataFrames
         config: Configuration object
         logger: The logger to use
@@ -140,11 +160,11 @@ def process_data(process, raw_dfs, config, logger):
     """
     # Process expenses and income data
     logger.info("Processing expenses data...")
-    df_expenses = process.process_expense_income_data(raw_dfs["expenses"], "expenses")
+    df_expenses = process_module.process_expense_income_data(raw_dfs["expenses"], "expenses")
     logger.info(f"Processed {len(df_expenses)} expense records")
 
     logger.info("Processing income data...")
-    df_income = process.process_expense_income_data(raw_dfs["income"], "income")
+    df_income = process_module.process_expense_income_data(raw_dfs["income"], "income")
     logger.info(f"Processed {len(df_income)} income records")
 
     # Save processed data
@@ -166,10 +186,10 @@ def process_data(process, raw_dfs, config, logger):
             logger.error(f"Failed to save processed income: {e}")
 
     # Process savings data if available
-    df_savings = None
+    df_savings: Optional[pl.DataFrame] = None
     if "savings" in raw_dfs and raw_dfs["savings"] is not None:
         logger.info("Processing savings data...")
-        df_savings = process.process_savings_data(raw_dfs["savings"])
+        df_savings = process_module.process_savings_data(raw_dfs["savings"])
         logger.info(f"Processed {len(df_savings)} savings records")
 
         # Save processed savings data
@@ -186,7 +206,7 @@ def process_data(process, raw_dfs, config, logger):
             "No savings data available, checking for cached processed data..."
         )
         df_savings = load_from_cache(
-            config.get("processed_savings_path"),
+            config.get("processed_savings_path", ""),
             logger,
             "Loading processed savings data from cache",
         )
@@ -196,7 +216,7 @@ def process_data(process, raw_dfs, config, logger):
     return df_expenses, df_income, df_savings
 
 
-def main():
+def main() -> int:
     """
     Main application entry point.
 
@@ -214,7 +234,7 @@ def main():
     setup_directories()
 
     # Initialize the application logger
-    logger = create_logger("finance_dashboard", level=logging.WARNING)
+    logger = create_logger("finance_dashboard", level=logging.INFO)
     logger.info("Starting Finance Dashboard application...")
 
     try:
@@ -224,6 +244,14 @@ def main():
 
         try:
             config = Config(config_path)
+            
+            # Set log level from configuration if available
+            log_level_name = config.get("log_level", "INFO")
+            numeric_level = getattr(logging, log_level_name.upper(), None)
+            if isinstance(numeric_level, int):
+                logger.setLevel(numeric_level)
+                logger.info(f"Log level set to {log_level_name}")
+            
         except FileNotFoundError:
             logger.critical(f"Configuration file not found at {config_path}")
             return 1
@@ -273,7 +301,12 @@ def main():
         try:
             dashboard = FinanceDashboard(config, logger)
             logger.info("Starting dashboard server...")
-            dashboard.run_server(debug=True)
+            
+            # Get port from config or use default
+            port = config.get("dashboard_port", 8050)
+            debug_mode = config.get("debug_mode", False)
+            
+            dashboard.run_server(debug=debug_mode, port=port)
         except Exception as e:
             error_traceback = traceback.format_exc()
             log_error(logger, f"Failed to start dashboard: {str(e)}", error_traceback)
