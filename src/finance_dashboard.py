@@ -1177,7 +1177,7 @@ class ChartFactory:
         self, df_categories: Optional[pl.DataFrame], title: str, is_income: bool = False
     ) -> go.Figure:
         """
-        Create a donut chart for expense or income categories.
+        Create a donut chart for expense or income categories with legend outside the plot.
 
         Args:
             df_categories: DataFrame with category data
@@ -1219,21 +1219,57 @@ class ChartFactory:
         if len(colors) < len(labels):
             colors = colors * (len(labels) // len(colors) + 1)
 
+        # Create custom hover text with formatted values
+        hover_texts = []
+        for i, (label, value) in enumerate(zip(labels, values)):
+            percentage = (value / sum(values) * 100) if sum(values) > 0 else 0
+            hover_texts.append(f"{label}: {value:,.2f}€ ({percentage:.1f}%)")
+
         fig = go.Figure(
             data=[
                 go.Pie(
                     labels=labels,
                     values=values,
-                    hole=0.6,  # Set a larger hole for an elegant donut
-                    textinfo="label+percent",
+                    hole=0.6,  # Keep large hole for elegant donut
+                    textinfo="label",  # Show only category labels
                     marker=dict(colors=colors),
                     textposition="outside",
                     textfont=dict(size=12),
+                    hovertext=hover_texts,
+                    hoverinfo="text",
                 )
             ]
         )
 
+        # First apply basic styling
         fig = self.chart_styler.apply_styling(fig, title)
+
+        # Then add specific layout for pie charts with external legend
+        fig.update_layout(
+            # Set a fixed height for both charts to ensure they're the same size
+            height=550,
+            # Create plenty of space below for the legend
+            margin=dict(t=80, b=200, l=5, r=5),
+            # Force the legend outside the plot area
+            legend=dict(
+                orientation="h",
+                y=-0.3,  # Position below the plot area
+                yanchor="top",
+                x=0.5,
+                xanchor="center",
+                # Make the legend span most of the width
+                entrywidth=90,
+                # Force it outside
+                bordercolor="#E2E8F0",
+                borderwidth=1,
+            ),
+        )
+
+        # Position the text labels to avoid overlap with legend
+        fig.update_traces(
+            insidetextfont=dict(size=12),
+            outsidetextfont=dict(size=12),
+        )
 
         return fig
 
