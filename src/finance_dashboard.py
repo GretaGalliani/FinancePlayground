@@ -1245,7 +1245,8 @@ class ChartFactory:
         is_income: bool = False,
     ) -> go.Figure:
         """
-        Create a stacked bar chart with a single hover text per month and no embedded text.
+        Create a stacked bar chart with custom hover text for each segment showing
+        the month total, category value, and category percentage of the month total.
 
         Args:
             df_stacked: DataFrame with stacked data
@@ -1303,7 +1304,7 @@ class ChartFactory:
         # Create a mapping between displayed months and actual month values
         month_mapping = dict(zip(formatted_months, all_months))
 
-        # Create monthly data structure
+        # Create monthly data structure and calculate percentages
         monthly_data = {}
         for month_display, month_raw in zip(formatted_months, all_months):
             month_df = df_stacked.filter(pl.col("Month") == month_raw)
@@ -1316,10 +1317,12 @@ class ChartFactory:
                 if len(cat_df) > 0:
                     value = cat_df[value_column].sum()
                     if value > 0:  # Only include categories with values
+                        percentage = (value / total * 100) if total > 0 else 0
                         cat_data.append(
                             {
                                 "category": category,
                                 "value": value,
+                                "percentage": percentage,
                                 "color": color_map[category],
                             }
                         )
@@ -1332,52 +1335,50 @@ class ChartFactory:
         # Create the figure
         fig = go.Figure()
 
-        # Pre-compute hover texts for each month
-        hover_texts = {}
-        for month in formatted_months:
-            month_text = f"<b>{month}: {monthly_data[month]['total']:,.2f}€</b><br>"
-            for cat_info in monthly_data[month]["categories"]:
-                month_text += f"<span style='color:{cat_info['color']}; font-size:16px;'>■</span> {cat_info['category']}: {cat_info['value']:,.2f}€<br>"
-            hover_texts[month] = month_text
-
-        # Just add an invisible separate trace for hover (will appear above all bars)
-        for month_idx, month in enumerate(formatted_months):
-            fig.add_trace(
-                go.Scatter(
-                    x=[month],
-                    y=[monthly_data[month]["total"]],  # Place at the top of the stack
-                    mode="markers",
-                    marker=dict(opacity=0, size=1),
-                    hoverinfo="text",
-                    hovertext=hover_texts[month],
-                    showlegend=False,
-                )
-            )
-
-        # For each category, add a trace to the stacked bar
+        # For each category, add a trace to the stacked bar with custom hover text
         for i, category in enumerate(unique_categories):
             values = []
+            hover_texts = []
 
+            # Create values and hover texts for each month for this category
             for month in formatted_months:
-                # Get this category's value
+                # Get this category's value for the month
                 cat_value = 0
+                cat_percentage = 0
+                month_total = monthly_data[month]["total"]
+
                 for cat in monthly_data[month]["categories"]:
                     if cat["category"] == category:
                         cat_value = cat["value"]
+                        cat_percentage = cat["percentage"]
                         break
 
                 values.append(cat_value)
 
-            # Add the trace with no hover
-            fig.add_trace(
-                go.Bar(
-                    x=formatted_months,
-                    y=values,
-                    name=category,
-                    marker_color=colors[i],
-                    hoverinfo="none",  # No hover info
+                # Create the hover text for this segment with month total, category value, and percentage
+                hover_text = (
+                    f"<b>{month}</b><br>"
+                    + f"<b>Total:</b> {month_total:,.2f}€<br>"
+                    + f"<b>{category}:</b> {cat_value:,.2f}€<br>"
+                    + f"<b>Percentage:</b> {cat_percentage:.1f}%"
                 )
-            )
+
+                hover_texts.append(hover_text)
+
+            # Only add trace if there are values
+            if sum(values) > 0:
+                fig.add_trace(
+                    go.Bar(
+                        x=formatted_months,
+                        y=values,
+                        name=category,
+                        marker_color=colors[i],
+                        hoverinfo="text",
+                        hovertext=hover_texts,
+                        text=None,
+                        textposition="none",  # Don't show text on bars to avoid clutter
+                    )
+                )
 
         # Style the figure
         fig = self.chart_styler.apply_styling(fig, title)
@@ -1386,8 +1387,8 @@ class ChartFactory:
         fig.update_layout(
             barmode="stack",
             yaxis=dict(title="Amount (€)"),
-            hovermode="closest",  # Use closest mode for best single hover behavior
-            # Adjust legend positioning
+            hovermode="closest",  # Use closest mode for best hover behavior
+            # Standard legend positioning
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
