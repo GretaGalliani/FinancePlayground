@@ -1281,22 +1281,31 @@ class ChartFactory:
 
         return fig
 
-    def create_savings_breakdown(
-        self, df_savings_by_category: Optional[pl.DataFrame]
+    def create_savings_overview_area(
+        self,
+        df_savings_metrics: Optional[pl.DataFrame],
+        df_savings: Optional[pl.DataFrame],
     ) -> go.Figure:
         """
-        Create a pie chart showing the breakdown of savings by category with consistent colors.
+        Create a savings overview area chart divided by category.
 
         Args:
-            df_savings_by_category: DataFrame with savings by category
+            df_savings_metrics: DataFrame with savings metrics over time
+            df_savings: DataFrame with detailed savings transactions
 
         Returns:
-            go.Figure: Plotly figure for the dashboard
+            go.Figure: Area chart showing savings by category over time
         """
-        if df_savings_by_category is None or len(df_savings_by_category) == 0:
+        if (
+            df_savings_metrics is None
+            or len(df_savings_metrics) == 0
+            or df_savings is None
+            or len(df_savings) == 0
+        ):
             fig = go.Figure()
             fig.update_layout(
-                title="Savings Breakdown - No Data Available",
+                title="Savings Overview by Category - No Data Available",
+                yaxis=dict(title="Amount (€)"),
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
@@ -1311,28 +1320,242 @@ class ChartFactory:
             )
             return fig
 
-        # Extract categories and values for the pie chart
-        categories = df_savings_by_category["Category"].to_list()
-        values = df_savings_by_category["Value"].to_list()
+        # Process savings data to aggregate by month and category for Risparmio categories only
+        df_risparmio = df_savings.filter(pl.col("CategoryType") == "Risparmio")
+
+        if len(df_risparmio) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Savings Overview by Category - No Savings Data Available",
+                yaxis=dict(title="Amount (€)"),
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No savings categorized as 'Risparmio' available",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Ensure we have Month column
+        if "Month" not in df_risparmio.columns:
+            df_risparmio = df_risparmio.with_columns(
+                pl.col("Date").dt.strftime("%Y-%m").alias("Month")
+            )
+
+        # Group by month and category, calculate cumulative value for each category
+        months = sorted(df_savings_metrics["Month"].to_list())
+        categories = sorted(df_risparmio["Category"].unique().to_list())
 
         # Get consistent colors for savings categories
-        colors = self.category_mapper.get_savings_colors(categories)
+        category_colors = {
+            cat: self.category_mapper.get_savings_category_color(cat)
+            for cat in categories
+        }
 
-        # Create the pie chart
+        # Calculate cumulative sum for each category by month
+        monthly_category_data = {}
+
+        for category in categories:
+            category_data = []
+            running_total = 0
+
+            for month in months:
+                # Filter data for this category and month
+                month_data = df_risparmio.filter(
+                    (pl.col("Month") <= month) & (pl.col("Category") == category)
+                )
+
+                if len(month_data) > 0:
+                    # Calculate net savings for this category (account for withdrawals)
+                    month_value = month_data["Value"].sum()
+                    running_total += month_value
+
+                category_data.append({"month": month, "value": running_total})
+
+            monthly_category_data[category] = category_data
+
+        # Create figure with one area trace per category
         fig = go.Figure()
-        fig.add_trace(
-            go.Pie(
-                labels=categories,
-                values=values,
-                hole=0.3,
-                textinfo="label+percent",
-                insidetextorientation="radial",
-                marker=dict(colors=colors),  # Use consistent colors
+
+        for category in categories:
+            x_values = [item["month"] for item in monthly_category_data[category]]
+            y_values = [item["value"] for item in monthly_category_data[category]]
+
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values,
+                    y=y_values,
+                    name=category,
+                    mode="lines",
+                    line=dict(width=0.5, color=category_colors[category]),
+                    fill="tonexty",  # Fill to next y trace
+                    stackgroup="one",  # This makes it stack
+                    hovertemplate="%{x}<br>%{y:,.2f}€<extra>" + category + "</extra>",
+                )
             )
+
+        # Style the figure
+        fig = self.chart_styler.apply_styling(fig, "Savings Categories Over Time")
+        fig.update_layout(
+            yaxis=dict(title="Cumulative Amount (€)"),
+            hovermode="x unified",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5
+            ),
         )
 
+        return fig
+
+    def create_category_savings_breakdown(
+        self, df_savings: Optional[pl.DataFrame]
+    ) -> go.Figure:
+        """
+        Create a pie chart showing the breakdown of savings categories at the latest month.
+
+        Args:
+            df_savings: DataFrame with savings data
+
+        Returns:
+            go.Figure: Pie chart showing savings categories breakdown
+        """
+        if df_savings is None or len(df_savings) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Savings Breakdown by Category - No Data Available",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No savings data available for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Filter to only include Risparmio categories
+        df_risparmio = df_savings.filter(pl.col("CategoryType") == "Risparmio")
+
+        if len(df_risparmio) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Savings Breakdown by Category - No Risparmio Data",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No savings categorized as 'Risparmio' available",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Ensure we have Month column
+        if "Month" not in df_risparmio.columns:
+            df_risparmio = df_risparmio.with_columns(
+                pl.col("Date").dt.strftime("%Y-%m").alias("Month")
+            )
+
+        # Get the latest month
+        latest_month = df_risparmio["Month"].max()
+
+        # Calculate the category totals for all data up to the latest month
+        categories = (
+            df_risparmio.filter(pl.col("Month") <= latest_month)["Category"]
+            .unique()
+            .to_list()
+        )
+
+        # Prepare data for the pie chart
+        labels = []
+        values = []
+        colors = []
+
+        # Calculate the total for each category
+        for category in categories:
+            category_data = df_risparmio.filter(
+                (pl.col("Category") == category) & (pl.col("Month") <= latest_month)
+            )
+
+            if len(category_data) > 0:
+                total_value = category_data["Value"].sum()
+
+                # Only include categories with positive values
+                if total_value > 0:
+                    labels.append(category)
+                    values.append(total_value)
+                    colors.append(
+                        self.category_mapper.get_savings_category_color(category)
+                    )
+
+        # If we have no positive values, display a message
+        if not values or sum(values) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Savings Breakdown by Category - No Positive Savings",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No positive savings found for the selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Create hover text with formatted values and percentages
+        hover_texts = []
+        for i, (label, value) in enumerate(zip(labels, values)):
+            percentage = value / sum(values) * 100
+            hover_texts.append(f"{label}: {value:,.2f}€ ({percentage:.1f}%)")
+
+        # Create the pie chart
+        fig = go.Figure(
+            data=[
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    hole=0.4,
+                    marker=dict(colors=colors),
+                    textinfo="percent",
+                    hoverinfo="text",
+                    hovertext=hover_texts,
+                    textfont=dict(size=14),
+                )
+            ]
+        )
+
+        # Style the figure
         fig = self.chart_styler.apply_styling(
-            fig, "Savings Breakdown by Category (Risparmio Only)"
+            fig, f"Savings Breakdown as of {latest_month}"
+        )
+
+        # Update specific pie chart styling
+        fig.update_layout(
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.2,
+                xanchor="center",
+                x=0.5,
+            ),
         )
 
         return fig
@@ -1911,12 +2134,14 @@ class FinanceDashboard:
             )
 
             # Create savings elements - THIS WAS MISSING
-            fig_savings_overview = self.chart_factory.create_savings_overview(
-                filtered_savings_metrics
+            fig_savings_overview = self.chart_factory.create_savings_overview_area(
+                filtered_savings_metrics, filtered_processed_savings
             )
 
-            fig_savings_breakdown = self.chart_factory.create_savings_breakdown(
-                self.dataset_loader.get_dataset("savings_by_category")
+            fig_savings_breakdown = (
+                self.chart_factory.create_category_savings_breakdown(
+                    filtered_processed_savings
+                )
             )
             fig_savings_allocation = self.chart_factory.create_savings_allocation(
                 self.dataset_loader.get_dataset("savings_allocation")

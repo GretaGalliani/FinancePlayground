@@ -203,8 +203,8 @@ income_category_colors:
 # Fixed color mappings for savings categories
 savings_category_colors:
   "Accantomenti generali": "#9D4EDD"  # Lavender
-  "Risparmi generali": "#078080"      # Mint/Teal
-  "Fondo vacanze": "#F45D48"          # Coral/Red
+  "Risparmi generali": "#06D6A0"      # Bright teal
+  "Fondo vacanze": "#FFD166"          # Vibrant yellow
   "Psicologa": "#4FB9B9"              # Light teal
 
 ###############
