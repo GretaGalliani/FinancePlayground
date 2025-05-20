@@ -1,4 +1,4 @@
-#!/filepath: main.py
+#!/filepath: src/main.py
 """
 Main module for the Finance Dashboard application.
 
@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import polars as pl
 
+from category_mapper import CategoryMapper
 from config import Config
 from data_wrangler import DataWrangler
 from finance_dashboard import FinanceDashboard
@@ -268,6 +269,10 @@ def main() -> int:
             logger.critical(f"Failed to load configuration: {e}")
             return 1
 
+        # Initialize category mapper for consistent colors
+        category_mapper = CategoryMapper(config, logger)
+        logger.info("Category mapper initialized")
+
         # Initialize data wrangler and process components with logger
         data_wrangler = DataWrangler(config, logger)
         process = Process(config, logger)
@@ -305,10 +310,9 @@ def main() -> int:
                 "Continuing with dashboard initialization, but some features may not work properly"
             )
 
-        # Initialize and run dashboard
         logger.info("Initializing dashboard...")
         try:
-            dashboard = FinanceDashboard(config, logger)
+            dashboard = FinanceDashboard(config, logger, category_mapper)
             logger.info("Starting dashboard server...")
 
             # Get port from config or use default

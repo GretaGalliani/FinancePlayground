@@ -20,6 +20,8 @@ import plotly.graph_objects as go
 import polars as pl
 from dash import Input, Output, dash_table, dcc, html
 
+from category_mapper import CategoryMapper
+
 if TYPE_CHECKING:
     from config import Config
 
@@ -965,89 +967,474 @@ class ChartFactory:
     Factory for creating different types of charts and visualizations.
 
     This class is responsible for generating all chart components
-    for the dashboard using the provided datasets.
+    for the dashboard using the provided datasets with consistent category colors.
     """
 
-    def __init__(self, color_theme: Dict[str, Any], chart_styler: ChartStyler):
+    def __init__(
+        self,
+        color_theme: Dict[str, Any],
+        chart_styler: Any,
+        category_mapper: CategoryMapper,
+    ):
         """
         Initialize the chart factory.
 
         Args:
             color_theme: Color theme for the charts
             chart_styler: Chart styler instance for consistent styling
+            category_mapper: CategoryMapper for consistent category colors
         """
         self.color_theme = color_theme
         self.chart_styler = chart_styler
+        self.category_mapper = category_mapper
+        self.logger = logging.getLogger(__name__)
 
-    def create_savings_table(self, df_savings: Optional[pl.DataFrame]) -> Any:
+
+#!/filepath: src/chart_factory.py
+"""
+ChartFactory module for creating visualizations in the finance dashboard.
+
+This module is responsible for generating all chart components
+for the dashboard using the provided datasets and consistent category colors.
+"""
+
+import logging
+from typing import Any, Dict, List, Optional
+
+import plotly.graph_objects as go
+import polars as pl
+from dash import dash_table, html
+
+from category_mapper import CategoryMapper
+
+
+class ChartFactory:
+    """
+    Factory for creating different types of charts and visualizations.
+
+    This class is responsible for generating all chart components
+    for the dashboard using the provided datasets with consistent category colors.
+    """
+
+    def __init__(
+        self,
+        color_theme: Dict[str, Any],
+        chart_styler: Any,
+        category_mapper: CategoryMapper,
+    ):
         """
-        Create a table of savings transactions.
+        Initialize the chart factory.
 
         Args:
-            df_savings: DataFrame with savings transactions
+            color_theme: Color theme for the charts
+            chart_styler: Chart styler instance for consistent styling
+            category_mapper: CategoryMapper for consistent category colors
+        """
+        self.color_theme = color_theme
+        self.chart_styler = chart_styler
+        self.category_mapper = category_mapper
+        self.logger = logging.getLogger(__name__)
+
+    def create_category_donut(
+        self, df_categories: Optional[pl.DataFrame], title: str, is_income: bool = False
+    ) -> go.Figure:
+        """
+        Create a donut chart for expense or income categories with consistent colors.
+
+        Args:
+            df_categories: DataFrame with category data
+            title: Chart title
+            is_income: Whether this is an income chart (affects colors)
 
         Returns:
-            dash_table.DataTable: DataTable component for the dashboard
+            go.Figure: Plotly figure for the dashboard
         """
-        if df_savings is None or len(df_savings) == 0:
-            return html.Div(
-                "No savings transactions available for the selected period."
+        if df_categories is None or len(df_categories) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title=f"{title} - No Data Available",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text=f"No {title.lower()} data available",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
             )
+            return fig
 
-        # Create a copy of the dataframe with sorted data
-        df_table = df_savings.sort("Date", descending=True)
+        # Create a donut chart for categories
+        labels = df_categories["Category"].to_list()
+        values = df_categories["Total"].to_list()
 
-        # Format date and numeric columns for display
-        df_table = df_table.with_columns(
-            [
-                pl.col("Date").dt.strftime("%d/%m/%Y").alias("Date"),
-                pl.col("Value")
-                .map_elements(lambda x: f"€{x:.2f}", return_dtype=pl.Utf8)
-                .alias("Amount"),
+        # Get consistent colors for the categories
+        if is_income:
+            colors = self.category_mapper.get_income_colors(labels)
+        else:
+            colors = self.category_mapper.get_expense_colors(labels)
+
+        # Create custom hover text with formatted values
+        hover_texts = []
+        for i, (label, value) in enumerate(zip(labels, values)):
+            percentage = (value / sum(values) * 100) if sum(values) > 0 else 0
+            hover_texts.append(f"{label}: {value:,.2f}€ ({percentage:.1f}%)")
+
+        fig = go.Figure(
+            data=[
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    hole=0.6,  # Keep large hole for elegant donut
+                    textinfo="label",  # Show only category labels
+                    marker=dict(colors=colors),
+                    textposition="outside",
+                    textfont=dict(size=12),
+                    hovertext=hover_texts,
+                    hoverinfo="text",
+                )
             ]
         )
 
-        # Select and rename columns for display
-        df_display = df_table.select(
-            ["Date", "Description", "Category", "CategoryType", "Value"]
+        # First apply basic styling
+        fig = self.chart_styler.apply_styling(fig, title)
+
+        # Then add specific layout for pie charts with external legend
+        fig.update_layout(
+            # Set a fixed height for both charts to ensure they're the same size
+            height=550,
+            # Create plenty of space below for the legend
+            margin=dict(t=80, b=200, l=5, r=5),
+            # Force the legend outside the plot area
+            legend=dict(
+                orientation="h",
+                y=-0.3,  # Position below the plot area
+                yanchor="top",
+                x=0.5,
+                xanchor="center",
+                # Make the legend span most of the width
+                entrywidth=90,
+                # Force it outside
+                bordercolor="#E2E8F0",
+                borderwidth=1,
+            ),
         )
 
-        # Convert directly to records for Dash without using pandas
-        records = df_display.to_dicts()
-
-        # Create the table
-        table = dash_table.DataTable(
-            data=records,
-            columns=[{"name": col, "id": col} for col in df_display.columns],
-            style_table={"overflowX": "auto"},
-            style_cell={
-                "textAlign": "left",
-                "padding": "10px",
-                "whiteSpace": "normal",
-                "height": "auto",
-            },
-            style_header={
-                "backgroundColor": "rgb(230, 230, 230)",
-                "fontWeight": "bold",
-            },
-            style_data_conditional=[
-                {
-                    "if": {"filter_query": '{Type} = "Allocation"'},
-                    "backgroundColor": "rgba(230, 126, 34, 0.2)",
-                },
-                {
-                    "if": {"filter_query": '{Type} = "Transfer"'},
-                    "backgroundColor": "rgba(39, 174, 96, 0.2)",
-                },
-                {
-                    "if": {"filter_query": '{Type} = "Payment"'},
-                    "backgroundColor": "rgba(231, 76, 60, 0.2)",
-                },
-            ],
-            page_size=10,
+        # Position the text labels to avoid overlap with legend
+        fig.update_traces(
+            insidetextfont=dict(size=12),
+            outsidetextfont=dict(size=12),
         )
 
-        return table
+        return fig
+
+    def create_stacked_bar(
+        self,
+        df_stacked: Optional[pl.DataFrame],
+        title: str,
+        value_column: str,
+        is_income: bool = False,
+    ) -> go.Figure:
+        """
+        Create a stacked bar chart with consistent category colors.
+
+        Args:
+            df_stacked: DataFrame with stacked data
+            title: Chart title
+            value_column: Column containing the values
+            is_income: Whether this is an income chart (affects colors)
+
+        Returns:
+            go.Figure: Plotly figure for the dashboard
+        """
+        if df_stacked is None or len(df_stacked) == 0:
+            fig = go.Figure()
+            fig = self.chart_styler.apply_styling(fig, f"{title} - No Data Available")
+            fig.update_layout(
+                yaxis=dict(title="Amount (€)"),
+                annotations=[
+                    dict(
+                        text="No data available for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        unique_categories = df_stacked["Category"].unique().to_list()
+
+        # Get consistent colors for the categories
+        if is_income:
+            color_map = {
+                category: self.category_mapper.get_income_category_color(category)
+                for category in unique_categories
+            }
+        else:
+            color_map = {
+                category: self.category_mapper.get_expense_category_color(category)
+                for category in unique_categories
+            }
+
+        # Get all months for consistent x-axis
+        all_months = sorted(df_stacked["Month"].unique().to_list())
+
+        # Format months for display
+        months = []
+        for month_str in all_months:
+            year, month = month_str.split("-")
+            month_name = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ][int(month) - 1]
+            months.append(f"{month_name} {year}")
+
+        # Create monthly data structure and calculate percentages
+        monthly_data = {}
+        for month_display, month_raw in zip(months, all_months):
+            month_df = df_stacked.filter(pl.col("Month") == month_raw)
+            total = month_df[value_column].sum()
+
+            # Get category data sorted by value
+            cat_data = []
+            for category in unique_categories:
+                cat_df = month_df.filter(pl.col("Category") == category)
+                if len(cat_df) > 0:
+                    value = cat_df[value_column].sum()
+                    if value > 0:  # Only include categories with values
+                        percentage = (value / total * 100) if total > 0 else 0
+                        cat_data.append(
+                            {
+                                "category": category,
+                                "value": value,
+                                "percentage": percentage,
+                                "color": color_map[category],
+                            }
+                        )
+
+            # Sort by value (largest first)
+            cat_data.sort(key=lambda x: x["value"], reverse=True)
+
+            monthly_data[month_display] = {"total": total, "categories": cat_data}
+
+        # Create the figure
+        fig = go.Figure()
+
+        # For each category, add a trace to the stacked bar with custom hover text
+        for category in unique_categories:
+            values = []
+            hover_texts = []
+
+            # Create values and hover texts for each month for this category
+            for month in months:
+                # Get this category's value for the month
+                cat_value = 0
+                cat_percentage = 0
+                month_total = monthly_data[month]["total"]
+
+                for cat in monthly_data[month]["categories"]:
+                    if cat["category"] == category:
+                        cat_value = cat["value"]
+                        cat_percentage = cat["percentage"]
+                        break
+
+                values.append(cat_value)
+
+                # Create the hover text for this segment with month total, category value, and percentage
+                hover_text = (
+                    f"<b>{month}</b><br>"
+                    + f"<b>Total:</b> {month_total:,.2f}€<br>"
+                    + f"<b>{category}:</b> {cat_value:,.2f}€<br>"
+                    + f"<b>Percentage:</b> {cat_percentage:.1f}%"
+                )
+
+                hover_texts.append(hover_text)
+
+            # Only add trace if there are values
+            if sum(values) > 0:
+                fig.add_trace(
+                    go.Bar(
+                        x=months,
+                        y=values,
+                        name=category,
+                        marker_color=color_map[category],  # Use consistent color
+                        hoverinfo="text",
+                        hovertext=hover_texts,
+                        text=None,
+                        textposition="none",  # Don't show text on bars to avoid clutter
+                    )
+                )
+
+        # Style the figure
+        fig = self.chart_styler.apply_styling(fig, title)
+
+        # Set layout properties
+        fig.update_layout(
+            barmode="stack",
+            yaxis=dict(title="Amount (€)"),
+            hovermode="closest",  # Use closest mode for best hover behavior
+            # Standard legend positioning
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.2,
+                xanchor="center",
+                x=0.5,
+            ),
+        )
+
+        return fig
+
+    def create_savings_breakdown(
+        self, df_savings_by_category: Optional[pl.DataFrame]
+    ) -> go.Figure:
+        """
+        Create a pie chart showing the breakdown of savings by category with consistent colors.
+
+        Args:
+            df_savings_by_category: DataFrame with savings by category
+
+        Returns:
+            go.Figure: Plotly figure for the dashboard
+        """
+        if df_savings_by_category is None or len(df_savings_by_category) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Savings Breakdown - No Data Available",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No savings data available for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Extract categories and values for the pie chart
+        categories = df_savings_by_category["Category"].to_list()
+        values = df_savings_by_category["Value"].to_list()
+
+        # Get consistent colors for savings categories
+        colors = self.category_mapper.get_savings_colors(categories)
+
+        # Create the pie chart
+        fig = go.Figure()
+        fig.add_trace(
+            go.Pie(
+                labels=categories,
+                values=values,
+                hole=0.3,
+                textinfo="label+percent",
+                insidetextorientation="radial",
+                marker=dict(colors=colors),  # Use consistent colors
+            )
+        )
+
+        fig = self.chart_styler.apply_styling(
+            fig, "Savings Breakdown by Category (Risparmio Only)"
+        )
+
+        return fig
+
+    def create_savings_allocation(
+        self, df_savings_allocation: Optional[pl.DataFrame]
+    ) -> go.Figure:
+        """
+        Create a grouped bar chart comparing allocated vs spent savings with consistent colors.
+
+        Args:
+            df_savings_allocation: DataFrame with savings allocation data
+
+        Returns:
+            go.Figure: Plotly figure for the dashboard
+        """
+        if df_savings_allocation is None or len(df_savings_allocation) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Allocation Status - No Data Available",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No savings data available for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Get unique categories and types for plotting
+        plot_categories = df_savings_allocation["Category"].unique().to_list()
+        plot_types = df_savings_allocation["Type"].unique().to_list()
+
+        # Build a figure with grouped bars
+        fig = go.Figure()
+
+        # Colors for different types
+        colors = {
+            "Saved": self.color_theme["income"],
+            "Allocated": self.color_theme["savings"]["allocation"],
+            "Spent from Savings": self.color_theme["expense"],
+            "Spent from Allocations": "#FFA07A",  # Light salmon color
+        }
+
+        for allocation_type in plot_types:
+            filtered_data = df_savings_allocation.filter(
+                pl.col("Type") == allocation_type
+            )
+
+            # Create a dict of values by category
+            values_by_category = {}
+            for category in plot_categories:
+                match = filtered_data.filter(pl.col("Category") == category)
+                values_by_category[category] = (
+                    match["Value"][0] if len(match) > 0 else 0
+                )
+
+            # Add bar trace
+            fig.add_trace(
+                go.Bar(
+                    name=allocation_type,
+                    x=list(values_by_category.keys()),
+                    y=list(values_by_category.values()),
+                    marker_color=colors.get(
+                        allocation_type, "#808080"
+                    ),  # Default gray if type not found
+                )
+            )
+
+        fig = self.chart_styler.apply_styling(fig, "Allocation Status by Category")
+        fig.update_layout(
+            yaxis=dict(title="Amount (€)"),
+            barmode="group",
+            legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+        )
+
+        return fig
 
     def create_monthly_overview(
         self, df_monthly_summary: Optional[pl.DataFrame]
@@ -1086,7 +1473,20 @@ class ChartFactory:
         for month_str in df_monthly_summary["Month"]:
             year = month_str.split("-")[0]
             month_num = int(month_str.split("-")[1])
-            month_name = datetime(2000, month_num, 1).strftime("%b")
+            month_name = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ][month_num - 1]
             months.append(f"{month_name} {year}")
 
         # Create combined data for hover
@@ -1173,269 +1573,6 @@ class ChartFactory:
 
         return fig
 
-    def create_category_donut(
-        self, df_categories: Optional[pl.DataFrame], title: str, is_income: bool = False
-    ) -> go.Figure:
-        """
-        Create a donut chart for expense or income categories with legend outside the plot.
-
-        Args:
-            df_categories: DataFrame with category data
-            title: Chart title
-            is_income: Whether this is an income chart (affects colors)
-
-        Returns:
-            go.Figure: Plotly figure for the dashboard
-        """
-        if df_categories is None or len(df_categories) == 0:
-            fig = go.Figure()
-            fig.update_layout(
-                title=f"{title} - No Data Available",
-                plot_bgcolor=self.color_theme["background"],
-                annotations=[
-                    dict(
-                        text=f"No {title.lower()} data available",
-                        showarrow=False,
-                        xref="paper",
-                        yref="paper",
-                        x=0.5,
-                        y=0.5,
-                    )
-                ],
-            )
-            return fig
-
-        # Create a donut chart for categories
-        labels = df_categories["Category"].to_list()
-        values = df_categories["Total"].to_list()
-
-        # Use different parts of the color palette for expenses vs income
-        if is_income:
-            colors = self.color_theme["categories"][8 : 8 + len(labels)]
-        else:
-            colors = self.color_theme["categories"][: len(labels)]
-
-        # Ensure we have enough colors
-        if len(colors) < len(labels):
-            colors = colors * (len(labels) // len(colors) + 1)
-
-        # Create custom hover text with formatted values
-        hover_texts = []
-        for i, (label, value) in enumerate(zip(labels, values)):
-            percentage = (value / sum(values) * 100) if sum(values) > 0 else 0
-            hover_texts.append(f"{label}: {value:,.2f}€ ({percentage:.1f}%)")
-
-        fig = go.Figure(
-            data=[
-                go.Pie(
-                    labels=labels,
-                    values=values,
-                    hole=0.6,  # Keep large hole for elegant donut
-                    textinfo="label",  # Show only category labels
-                    marker=dict(colors=colors),
-                    textposition="outside",
-                    textfont=dict(size=12),
-                    hovertext=hover_texts,
-                    hoverinfo="text",
-                )
-            ]
-        )
-
-        # First apply basic styling
-        fig = self.chart_styler.apply_styling(fig, title)
-
-        # Then add specific layout for pie charts with external legend
-        fig.update_layout(
-            # Set a fixed height for both charts to ensure they're the same size
-            height=550,
-            # Create plenty of space below for the legend
-            margin=dict(t=80, b=200, l=5, r=5),
-            # Force the legend outside the plot area
-            legend=dict(
-                orientation="h",
-                y=-0.3,  # Position below the plot area
-                yanchor="top",
-                x=0.5,
-                xanchor="center",
-                # Make the legend span most of the width
-                entrywidth=90,
-                # Force it outside
-                bordercolor="#E2E8F0",
-                borderwidth=1,
-            ),
-        )
-
-        # Position the text labels to avoid overlap with legend
-        fig.update_traces(
-            insidetextfont=dict(size=12),
-            outsidetextfont=dict(size=12),
-        )
-
-        return fig
-
-    def create_stacked_bar(
-        self,
-        df_stacked: Optional[pl.DataFrame],
-        title: str,
-        value_column: str,
-        is_income: bool = False,
-    ) -> go.Figure:
-        """
-        Create a stacked bar chart with custom hover text for each segment showing
-        the month total, category value, and category percentage of the month total.
-
-        Args:
-            df_stacked: DataFrame with stacked data
-            title: Chart title
-            value_column: Column containing the values
-            is_income: Whether this is an income chart (affects colors)
-
-        Returns:
-            go.Figure: Plotly figure for the dashboard
-        """
-        if df_stacked is None or len(df_stacked) == 0:
-            fig = go.Figure()
-            fig = self.chart_styler.apply_styling(fig, f"{title} - No Data Available")
-            fig.update_layout(
-                yaxis=dict(title="Amount (€)"),
-                annotations=[
-                    dict(
-                        text="No data available for selected period",
-                        showarrow=False,
-                        xref="paper",
-                        yref="paper",
-                        x=0.5,
-                        y=0.5,
-                    )
-                ],
-            )
-            return fig
-
-        unique_categories = df_stacked["Category"].unique().to_list()
-
-        # Use different parts of the color palette for expenses vs income
-        if is_income:
-            colors = self.color_theme["categories"][8 : 8 + len(unique_categories)]
-        else:
-            colors = self.color_theme["categories"][: len(unique_categories)]
-
-        # Ensure we have enough colors
-        if len(colors) < len(unique_categories):
-            colors = colors * (len(unique_categories) // len(colors) + 1)
-
-        # Create color map for categories
-        color_map = dict(zip(unique_categories, colors))
-
-        # Get all months for consistent x-axis
-        all_months = sorted(df_stacked["Month"].unique().to_list())
-
-        # Format months for display
-        formatted_months = []
-        for month_str in all_months:
-            year = month_str.split("-")[0]
-            month_num = int(month_str.split("-")[1])
-            month_name = datetime(2000, month_num, 1).strftime("%b")
-            formatted_months.append(f"{month_name} {year}")
-
-        # Create a mapping between displayed months and actual month values
-        month_mapping = dict(zip(formatted_months, all_months))
-
-        # Create monthly data structure and calculate percentages
-        monthly_data = {}
-        for month_display, month_raw in zip(formatted_months, all_months):
-            month_df = df_stacked.filter(pl.col("Month") == month_raw)
-            total = month_df[value_column].sum()
-
-            # Get category data sorted by value
-            cat_data = []
-            for category in unique_categories:
-                cat_df = month_df.filter(pl.col("Category") == category)
-                if len(cat_df) > 0:
-                    value = cat_df[value_column].sum()
-                    if value > 0:  # Only include categories with values
-                        percentage = (value / total * 100) if total > 0 else 0
-                        cat_data.append(
-                            {
-                                "category": category,
-                                "value": value,
-                                "percentage": percentage,
-                                "color": color_map[category],
-                            }
-                        )
-
-            # Sort by value (largest first)
-            cat_data.sort(key=lambda x: x["value"], reverse=True)
-
-            monthly_data[month_display] = {"total": total, "categories": cat_data}
-
-        # Create the figure
-        fig = go.Figure()
-
-        # For each category, add a trace to the stacked bar with custom hover text
-        for i, category in enumerate(unique_categories):
-            values = []
-            hover_texts = []
-
-            # Create values and hover texts for each month for this category
-            for month in formatted_months:
-                # Get this category's value for the month
-                cat_value = 0
-                cat_percentage = 0
-                month_total = monthly_data[month]["total"]
-
-                for cat in monthly_data[month]["categories"]:
-                    if cat["category"] == category:
-                        cat_value = cat["value"]
-                        cat_percentage = cat["percentage"]
-                        break
-
-                values.append(cat_value)
-
-                # Create the hover text for this segment with month total, category value, and percentage
-                hover_text = (
-                    f"<b>{month}</b><br>"
-                    + f"<b>Total:</b> {month_total:,.2f}€<br>"
-                    + f"<b>{category}:</b> {cat_value:,.2f}€<br>"
-                    + f"<b>Percentage:</b> {cat_percentage:.1f}%"
-                )
-
-                hover_texts.append(hover_text)
-
-            # Only add trace if there are values
-            if sum(values) > 0:
-                fig.add_trace(
-                    go.Bar(
-                        x=formatted_months,
-                        y=values,
-                        name=category,
-                        marker_color=colors[i],
-                        hoverinfo="text",
-                        hovertext=hover_texts,
-                        text=None,
-                        textposition="none",  # Don't show text on bars to avoid clutter
-                    )
-                )
-
-        # Style the figure
-        fig = self.chart_styler.apply_styling(fig, title)
-
-        # Set layout properties
-        fig.update_layout(
-            barmode="stack",
-            yaxis=dict(title="Amount (€)"),
-            hovermode="closest",  # Use closest mode for best hover behavior
-            # Standard legend positioning
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=-0.2,
-                xanchor="center",
-                x=0.5,
-            ),
-        )
-
-        return fig
-
     def create_savings_overview(
         self, df_savings_metrics: Optional[pl.DataFrame]
     ) -> go.Figure:
@@ -1516,160 +1653,93 @@ class ChartFactory:
 
         return fig
 
-    def create_savings_breakdown(
-        self, df_savings_by_category: Optional[pl.DataFrame]
-    ) -> go.Figure:
+    def create_savings_table(self, df_savings: Optional[pl.DataFrame]) -> Any:
         """
-        Create a pie chart showing the breakdown of savings by category.
+        Create a table of savings transactions.
 
         Args:
-            df_savings_by_category: DataFrame with savings by category
+            df_savings: DataFrame with savings transactions
 
         Returns:
-            go.Figure: Plotly figure for the dashboard
+            dash_table.DataTable: DataTable component for the dashboard
         """
-        if df_savings_by_category is None or len(df_savings_by_category) == 0:
-            fig = go.Figure()
-            fig.update_layout(
-                title="Savings Breakdown - No Data Available",
-                plot_bgcolor=self.color_theme["background"],
-                annotations=[
-                    dict(
-                        text="No savings data available for selected period",
-                        showarrow=False,
-                        xref="paper",
-                        yref="paper",
-                        x=0.5,
-                        y=0.5,
-                    )
-                ],
+        if df_savings is None or len(df_savings) == 0:
+            return html.Div(
+                "No savings transactions available for the selected period."
             )
-            return fig
 
-        # Extract categories and values for the pie chart
-        categories = df_savings_by_category["Category"].to_list()
-        values = df_savings_by_category["Value"].to_list()
+        # Create a copy of the dataframe with sorted data
+        df_table = df_savings.sort("Date", descending=True)
 
-        # Create the pie chart
-        fig = go.Figure()
-        fig.add_trace(
-            go.Pie(
-                labels=categories,
-                values=values,
-                hole=0.3,
-                textinfo="label+percent",
-                insidetextorientation="radial",
-            )
+        # Format date and numeric columns for display
+        df_table = df_table.with_columns(
+            [
+                pl.col("Date").dt.strftime("%d/%m/%Y").alias("Date"),
+                pl.col("Value")
+                .map_elements(lambda x: f"€{x:.2f}", return_dtype=pl.Utf8)
+                .alias("Amount"),
+            ]
         )
 
-        fig = self.chart_styler.apply_styling(
-            fig, "Savings Breakdown by Category (Risparmio Only)"
+        # Select and rename columns for display
+        df_display = df_table.select(
+            ["Date", "Description", "Category", "CategoryType", "Value"]
         )
 
-        return fig
+        # Convert directly to records for Dash without using pandas
+        records = df_display.to_dicts()
 
-    def create_savings_allocation(
-        self, df_savings_allocation: Optional[pl.DataFrame]
-    ) -> go.Figure:
-        """
-        Create a grouped bar chart comparing allocated vs spent savings.
+        # Create the table
+        table = dash_table.DataTable(
+            data=records,
+            columns=[{"name": col, "id": col} for col in df_display.columns],
+            style_table={"overflowX": "auto"},
+            style_cell={
+                "textAlign": "left",
+                "padding": "10px",
+                "whiteSpace": "normal",
+                "height": "auto",
+            },
+            style_header={
+                "backgroundColor": "rgb(230, 230, 230)",
+                "fontWeight": "bold",
+            },
+            style_data_conditional=[
+                {
+                    "if": {"filter_query": '{CategoryType} = "Accantonamento"'},
+                    "backgroundColor": "rgba(7, 128, 128, 0.05)",  # Very light teal
+                    "borderLeft": f"3px solid {self.color_theme['income']}",
+                },
+                {
+                    "if": {"filter_query": "{Value} < 0"},
+                    "backgroundColor": "rgba(244, 93, 72, 0.05)",  # Very light coral
+                    "borderLeft": f"3px solid {self.color_theme['expense']}",
+                },
+            ],
+            page_size=10,
+        )
 
-        Args:
-            df_savings_allocation: DataFrame with savings allocation data
-
-        Returns:
-            go.Figure: Plotly figure for the dashboard
-        """
-        if df_savings_allocation is None or len(df_savings_allocation) == 0:
-            fig = go.Figure()
-            fig.update_layout(
-                title="Allocation Status - No Data Available",
-                plot_bgcolor=self.color_theme["background"],
-                annotations=[
-                    dict(
-                        text="No savings data available for selected period",
-                        showarrow=False,
-                        xref="paper",
-                        yref="paper",
-                        x=0.5,
-                        y=0.5,
-                    )
-                ],
-            )
-            return fig
-
-        # Get unique categories and types for plotting
-        plot_categories = df_savings_allocation["Category"].unique().to_list()
-        plot_types = df_savings_allocation["Type"].unique().to_list()
-
-        # Build a figure with grouped bars
-        fig = go.Figure()
-
-        # Colors for different types
-        colors = {
-            "Saved": self.color_theme["income"],
-            "Allocated": self.color_theme["savings"]["allocation"],
-            "Spent from Savings": self.color_theme["expense"],
-            "Spent from Allocations": "#FFA07A",  # Light salmon color
-        }
-
-        for allocation_type in plot_types:
-            filtered_data = df_savings_allocation.filter(
-                pl.col("Type") == allocation_type
-            )
-
-            # Create a dict of values by category
-            values_by_category = {}
-            for category in plot_categories:
-                match = filtered_data.filter(pl.col("Category") == category)
-                values_by_category[category] = (
-                    match["Value"][0] if len(match) > 0 else 0
-                )
-
-            # Add bar trace
-            fig.add_trace(
-                go.Bar(
-                    name=allocation_type,
-                    x=list(values_by_category.keys()),
-                    y=list(values_by_category.values()),
-                    marker_color=colors.get(
-                        allocation_type, "#808080"
-                    ),  # Default gray if type not found
-                )
-            )
-
-            fig = self.chart_styler.apply_styling(fig, "Allocation Status by Category")
-            fig.update_layout(
-                yaxis=dict(title="Amount (€)"),
-                barmode="group",
-                legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
-            )
-
-            return fig
+        return table
 
 
 class FinanceDashboard:
     """
     A class for creating an interactive financial dashboard.
-
-    This class focuses solely on visualization using pre-processed datasets
-    generated by the Process class. It does not perform data processing
-    operations itself. The class orchestrates all dashboard components
-    and manages the interactions between them.
-
-    Attributes:
-        config: Configuration object containing paths to datasets
-        logger: Logger instance from the main application
-        app: Dash application instance
     """
 
-    def __init__(self, config: "Config", logger: logging.Logger):
+    def __init__(
+        self,
+        config: "Config",
+        logger: logging.Logger,
+        category_mapper: Optional[CategoryMapper] = None,
+    ):
         """
         Initialize the FinanceDashboard with configuration and logger.
 
         Args:
             config: Configuration object containing paths to datasets
             logger: Logger instance from the main application
+            category_mapper: Optional CategoryMapper for consistent category colors
         """
         self.config = config
         self.logger = logger.getChild("FinanceDashboard")
@@ -1710,8 +1780,13 @@ class FinanceDashboard:
         self.dataset_loader = DatasetLoader(config, logger)
         self.chart_styler = ChartStyler(dashboard_config)
         self.card_creator = CardCreator(dashboard_config.color_theme)
+
+        # Use provided category mapper or create a new one
+        self.category_mapper = category_mapper or CategoryMapper(config, logger)
+
+        # Initialize chart factory with the category mapper
         self.chart_factory = ChartFactory(
-            dashboard_config.color_theme, self.chart_styler
+            dashboard_config.color_theme, self.chart_styler, self.category_mapper
         )
 
         # Load the datasets
