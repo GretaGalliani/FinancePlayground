@@ -81,6 +81,10 @@ class DatasetLoader:
         self.datasets["savings_allocation"] = self._load_csv("savings_allocation_path")
         self.datasets["processed_savings"] = self._load_csv("processed_savings_path")
 
+        # Load processed raw data for filtering by date
+        self.datasets["processed_expenses"] = self._load_csv("processed_expenses_path")
+        self.datasets["processed_income"] = self._load_csv("processed_income_path")
+
         # Determine date range
         self._determine_date_range()
 
@@ -184,6 +188,59 @@ class DatasetLoader:
             pl.DataFrame or None: The requested dataset
         """
         return self.datasets.get(name)
+
+    def calculate_category_breakdown(
+        self,
+        dataset_key: str,
+        start_date: datetime,
+        end_date: datetime,
+        is_income: bool = False,
+    ) -> Optional[pl.DataFrame]:
+        """
+        Calculate category breakdown based on date range.
+
+        Args:
+            dataset_key: Key for the raw dataset in self.datasets
+            start_date: Start date
+            end_date: End date
+            is_income: Whether this is income data (affects sign)
+
+        Returns:
+            pl.DataFrame or None: Filtered and aggregated DataFrame with category breakdown
+        """
+        df = self.datasets.get(dataset_key)
+        if (
+            df is None
+            or len(df) == 0
+            or "Date" not in df.columns
+            or "Category" not in df.columns
+        ):
+            self.logger.warning(
+                f"Cannot calculate category breakdown: invalid dataset {dataset_key}"
+            )
+            return None
+
+        # Ensure Date is datetime
+        if df["Date"].dtype == pl.Utf8:
+            df = df.with_columns(pl.col("Date").str.to_datetime().alias("Date"))
+
+        # Filter by date range
+        filtered_df = df.filter(
+            (pl.col("Date") >= start_date) & (pl.col("Date") <= end_date)
+        )
+
+        if len(filtered_df) == 0:
+            self.logger.warning(f"No data in date range for {dataset_key}")
+            return None
+
+        # Group by category and sum values
+        result = (
+            filtered_df.groupby("Category")
+            .agg(pl.sum("Value").alias("Total"))
+            .sort("Total", descending=True)
+        )
+
+        return result
 
 
 class CardCreator:
@@ -555,6 +612,21 @@ class DateParser:
 
         # If we get here, none of the formats worked
         raise ValueError(f"Could not parse date: {date_string}")
+
+
+#!/filepath: src/dashboard_layout.py
+"""
+DashboardLayout module for financial dashboard.
+
+This module handles the layout and structure of the dashboard,
+including the placement of components and styling of the UI.
+"""
+
+from datetime import datetime
+from typing import Any, Dict
+
+import dash_bootstrap_components as dbc
+from dash import dcc, html
 
 
 class DashboardLayout:
@@ -960,52 +1032,6 @@ class ChartStyler:
         )
 
         return fig
-
-
-class ChartFactory:
-    """
-    Factory for creating different types of charts and visualizations.
-
-    This class is responsible for generating all chart components
-    for the dashboard using the provided datasets with consistent category colors.
-    """
-
-    def __init__(
-        self,
-        color_theme: Dict[str, Any],
-        chart_styler: Any,
-        category_mapper: CategoryMapper,
-    ):
-        """
-        Initialize the chart factory.
-
-        Args:
-            color_theme: Color theme for the charts
-            chart_styler: Chart styler instance for consistent styling
-            category_mapper: CategoryMapper for consistent category colors
-        """
-        self.color_theme = color_theme
-        self.chart_styler = chart_styler
-        self.category_mapper = category_mapper
-        self.logger = logging.getLogger(__name__)
-
-
-#!/filepath: src/chart_factory.py
-"""
-ChartFactory module for creating visualizations in the finance dashboard.
-
-This module is responsible for generating all chart components
-for the dashboard using the provided datasets and consistent category colors.
-"""
-
-import logging
-from typing import Any, Dict, List, Optional
-
-import plotly.graph_objects as go
-import polars as pl
-from dash import dash_table, html
-
-from category_mapper import CategoryMapper
 
 
 class ChartFactory:
@@ -1839,6 +1865,9 @@ class FinanceDashboard:
                 Tuple containing all dashboard components in the order of the Output callbacks
             """
             # Parse dates - each dropdown value contains the first day of the month
+            import calendar
+            from datetime import datetime
+
             try:
                 parsed_start_date = datetime.strptime(start_month, "%Y-%m-%d")
                 parsed_end_date = datetime.strptime(end_month, "%Y-%m-%d")
@@ -1863,21 +1892,40 @@ class FinanceDashboard:
 
             # Filter datasets by date range
             filtered_monthly_summary = self.dataset_loader.filter_monthly_dataset(
-                "monthly_summary_path", start_month, end_month
+                "monthly_summary_path", start_month_str, end_month_str
             )
             filtered_expenses_stacked = self.dataset_loader.filter_monthly_dataset(
-                "expenses_stacked_path", start_month, end_month
+                "expenses_stacked_path", start_month_str, end_month_str
             )
             filtered_income_stacked = self.dataset_loader.filter_monthly_dataset(
-                "income_stacked_path", start_month, end_month
+                "income_stacked_path", start_month_str, end_month_str
             )
             filtered_savings_metrics = self.dataset_loader.filter_monthly_dataset(
-                "savings_metrics_path", start_month, end_month
+                "savings_metrics_path", start_month_str, end_month_str
             )
 
             # Filter daily datasets
             filtered_processed_savings = self.dataset_loader.filter_daily_dataset(
                 "processed_savings_path", parsed_start_date, parsed_end_date
+            )
+
+            # Calculate category breakdowns based on the filtered date range
+            filtered_expenses_by_category = (
+                self.dataset_loader.calculate_category_breakdown(
+                    "processed_expenses",
+                    parsed_start_date,
+                    parsed_end_date,
+                    is_income=False,
+                )
+            )
+
+            filtered_income_by_category = (
+                self.dataset_loader.calculate_category_breakdown(
+                    "processed_income",
+                    parsed_start_date,
+                    parsed_end_date,
+                    is_income=True,
+                )
             )
 
             # Create dashboard elements
@@ -1888,13 +1936,13 @@ class FinanceDashboard:
                 filtered_monthly_summary
             )
 
-            # Create category visualizations using original datasets for complete picture
+            # Create category visualizations using filtered data for the selected time period
             fig_expense_pie_chart = self.chart_factory.create_category_donut(
-                self.dataset_loader.get_dataset("expenses_by_category"),
+                filtered_expenses_by_category,
                 "Expense Breakdown by Category",
             )
             fig_income_pie_chart = self.chart_factory.create_category_donut(
-                self.dataset_loader.get_dataset("income_by_category"),
+                filtered_income_by_category,
                 "Income Breakdown by Category",
                 is_income=True,
             )
