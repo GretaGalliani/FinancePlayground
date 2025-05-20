@@ -260,12 +260,17 @@ class CardCreator:
         """
         self.color_theme = color_theme
 
-    def create_summary_cards(self, df_monthly_summary: Optional[pl.DataFrame]) -> Any:
+    def create_summary_cards(
+        self,
+        df_monthly_summary: Optional[pl.DataFrame],
+        df_savings_metrics: Optional[pl.DataFrame],
+    ) -> Any:
         """
-        Create summary cards for income, expenses, and balance with improved formatting.
+        Create summary cards for income, expenses, balance, and savings with improved formatting.
 
         Args:
             df_monthly_summary: DataFrame with monthly summary data
+            df_savings_metrics: DataFrame with savings metrics data
 
         Returns:
             dbc.Row: Row of cards for the dashboard
@@ -277,14 +282,45 @@ class CardCreator:
                 className="text-center p-4",
             )
 
-        total_income = df_monthly_summary["Income"].sum()
-        total_expenses = df_monthly_summary["Expenses"].sum()
+        # Calculate income, expenses, and balance metrics
+        total_income = (
+            df_monthly_summary["Income"].sum()
+            if "Income" in df_monthly_summary.columns
+            else 0
+        )
+        total_expenses = (
+            df_monthly_summary["Expenses"].sum()
+            if "Expenses" in df_monthly_summary.columns
+            else 0
+        )
         total_balance = total_income - total_expenses
 
         months_count = len(df_monthly_summary)
         monthly_avg_income = total_income / months_count if months_count > 0 else 0
         monthly_avg_expenses = total_expenses / months_count if months_count > 0 else 0
         monthly_avg_balance = total_balance / months_count if months_count > 0 else 0
+
+        # Calculate total savings - with more robust error handling
+        total_savings = 0.0
+        latest_month = "N/A"
+
+        if (
+            df_savings_metrics is not None
+            and len(df_savings_metrics) > 0
+            and "Month" in df_savings_metrics.columns
+        ):
+            try:
+                # Get the latest month's metrics
+                latest_month = df_savings_metrics["Month"].max()
+                latest_metrics = df_savings_metrics.filter(
+                    pl.col("Month") == latest_month
+                )
+
+                if len(latest_metrics) > 0 and "TotalSavings" in latest_metrics.columns:
+                    total_savings = latest_metrics["TotalSavings"][0]
+            except Exception as e:
+                # Handle any unexpected errors silently
+                pass
 
         # Format numbers with thousands separator (,) and decimal point (.)
         def format_currency(value):
@@ -300,7 +336,11 @@ class CardCreator:
                                 html.H3(
                                     format_currency(total_income),
                                     className="card-text font-weight-bold",
-                                    style={"color": self.color_theme["income"]},
+                                    style={
+                                        "color": self.color_theme.get(
+                                            "income", "#078080"
+                                        )
+                                    },
                                 ),
                                 html.P(
                                     f"Monthly average: {format_currency(monthly_avg_income)}",
@@ -311,10 +351,10 @@ class CardCreator:
                         className="shadow-sm",
                         style={
                             "background-color": "#fffffe",
-                            "border-color": self.color_theme["income"],
+                            "border-color": self.color_theme.get("income", "#078080"),
                         },
                     ),
-                    width=4,
+                    width=3,
                 ),
                 dbc.Col(
                     dbc.Card(
@@ -324,7 +364,11 @@ class CardCreator:
                                 html.H3(
                                     format_currency(total_expenses),
                                     className="card-text font-weight-bold",
-                                    style={"color": self.color_theme["expense"]},
+                                    style={
+                                        "color": self.color_theme.get(
+                                            "expense", "#F45D48"
+                                        )
+                                    },
                                 ),
                                 html.P(
                                     f"Monthly average: {format_currency(monthly_avg_expenses)}",
@@ -335,10 +379,10 @@ class CardCreator:
                         className="shadow-sm",
                         style={
                             "background-color": "#fffffe",
-                            "border-color": self.color_theme["expense"],
+                            "border-color": self.color_theme.get("expense", "#F45D48"),
                         },
                     ),
-                    width=4,
+                    width=3,
                 ),
                 dbc.Col(
                     dbc.Card(
@@ -348,7 +392,11 @@ class CardCreator:
                                 html.H3(
                                     format_currency(total_balance),
                                     className="card-text font-weight-bold",
-                                    style={"color": self.color_theme["balance"]},
+                                    style={
+                                        "color": self.color_theme.get(
+                                            "balance", "#4361EE"
+                                        )
+                                    },
                                 ),
                                 html.P(
                                     f"Monthly average: {format_currency(monthly_avg_balance)}",
@@ -359,134 +407,40 @@ class CardCreator:
                         className="shadow-sm",
                         style={
                             "background-color": "#fffffe",
-                            "border-color": self.color_theme["balance"],
+                            "border-color": self.color_theme.get("balance", "#4361EE"),
                         },
                     ),
-                    width=4,
+                    width=3,
                 ),
-            ],
-            className="mb-4",
-        )
-
-        return cards
-
-    def create_savings_cards(self, df_savings_metrics: Optional[pl.DataFrame]) -> Any:
-        """
-        Create summary cards for savings data.
-
-        Args:
-            df_savings_metrics: DataFrame with savings metrics
-
-        Returns:
-            dbc.Row: Row of cards for the dashboard
-        """
-        if df_savings_metrics is None or len(df_savings_metrics) == 0:
-            return html.Div(
-                "No savings data available for the selected period.",
-                style={"color": self.color_theme.get("headline", "#6C3BCE")},
-                className="text-center p-4",
-            )
-
-        # Get the latest month's metrics
-        latest_month = df_savings_metrics["Month"].max()
-        latest_metrics = df_savings_metrics.filter(pl.col("Month") == latest_month)
-
-        if len(latest_metrics) == 0:
-            return html.Div(
-                "No savings metrics available for the selected period.",
-                style={"color": self.color_theme.get("headline", "#6C3BCE")},
-                className="text-center p-4",
-            )
-
-        total_savings = latest_metrics["TotalSavings"][0]
-        total_allocated = latest_metrics["TotalAllocated"][0]
-        total_spent = latest_metrics["TotalSpent"][0]
-
-        cards = dbc.Row(
-            [
                 dbc.Col(
                     dbc.Card(
                         dbc.CardBody(
                             [
-                                html.H5("Total Savings (€)", className="card-title"),
-                                html.H4(
-                                    f"{total_savings:.2f}",
-                                    className="card-text",
+                                html.H5("Total Savings", className="card-title"),
+                                html.H3(
+                                    format_currency(total_savings),
+                                    className="card-text font-weight-bold",
                                     style={
-                                        "color": self.color_theme["savings"]["total"]
+                                        "color": self.color_theme.get(
+                                            "savings", {}
+                                        ).get("total", "#6C3BCE")
                                     },
                                 ),
                                 html.P(
                                     f"As of {latest_month}",
                                     className="text-muted small",
                                 ),
-                                html.P(
-                                    "All 'Risparmio' type categories",
-                                    className="text-muted small",
-                                ),
                             ]
                         ),
                         className="shadow-sm",
                         style={
                             "background-color": "#fffffe",
-                            "border-color": self.color_theme["savings"]["total"],
+                            "border-color": self.color_theme.get("savings", {}).get(
+                                "total", "#6C3BCE"
+                            ),
                         },
                     ),
-                    width=4,
-                ),
-                dbc.Col(
-                    dbc.Card(
-                        dbc.CardBody(
-                            [
-                                html.H5("Allocated Funds (€)", className="card-title"),
-                                html.H4(
-                                    f"{total_allocated:.2f}",
-                                    className="card-text",
-                                    style={
-                                        "color": self.color_theme["savings"][
-                                            "allocation"
-                                        ]
-                                    },
-                                ),
-                                html.P(
-                                    "All 'Accantonamento' type categories (additions minus withdrawals)",
-                                    className="text-muted small",
-                                ),
-                            ]
-                        ),
-                        className="shadow-sm",
-                        style={
-                            "background-color": "#fffffe",
-                            "border-color": self.color_theme["savings"]["allocation"],
-                        },
-                    ),
-                    width=4,
-                ),
-                dbc.Col(
-                    dbc.Card(
-                        dbc.CardBody(
-                            [
-                                html.H5("Spent Funds (€)", className="card-title"),
-                                html.H4(
-                                    f"{total_spent:.2f}",
-                                    className="card-text",
-                                    style={
-                                        "color": self.color_theme["savings"]["spent"]
-                                    },
-                                ),
-                                html.P(
-                                    "Withdrawals from non-Accantonamento categories",
-                                    className="text-muted small",
-                                ),
-                            ]
-                        ),
-                        className="shadow-sm",
-                        style={
-                            "background-color": "#fffffe",
-                            "border-color": self.color_theme["savings"]["spent"],
-                        },
-                    ),
-                    width=4,
+                    width=3,
                 ),
             ],
             className="mb-4",
@@ -836,8 +790,8 @@ class DashboardLayout:
                     ],
                     className="mb-4",
                 ),
-                # Income & Expense cards placed above tabs
-                html.Div(id="income-expense-cards", className="mb-4 mt-4"),
+                # Unified summary cards row with all 4 cards
+                html.Div(id="summary-cards", className="mb-4 mt-4"),
                 dbc.Tabs(
                     [
                         dbc.Tab(
@@ -902,7 +856,7 @@ class DashboardLayout:
                         ),
                         dbc.Tab(
                             [
-                                html.Div(id="savings-cards", className="mb-4 mt-4"),
+                                # Removed savings cards since they're now in the main summary cards
                                 dbc.Row(
                                     [
                                         dbc.Col(
@@ -1836,13 +1790,12 @@ class FinanceDashboard:
 
         @self.app.callback(
             [
-                Output("income-expense-cards", "children"),
+                Output("summary-cards", "children"),
                 Output("main-dashboard", "figure"),
                 Output("expense-pie-chart", "figure"),
                 Output("income-pie-chart", "figure"),
                 Output("stacked-expenses", "figure"),
                 Output("stacked-income", "figure"),
-                Output("savings-cards", "children"),
                 Output("savings-overview", "figure"),
                 Output("savings-breakdown", "figure"),
                 Output("savings-allocation", "figure"),
@@ -1864,10 +1817,6 @@ class FinanceDashboard:
             Returns:
                 Tuple containing all dashboard components in the order of the Output callbacks
             """
-            # Parse dates - each dropdown value contains the first day of the month
-            import calendar
-            from datetime import datetime
-
             try:
                 parsed_start_date = datetime.strptime(start_month, "%Y-%m-%d")
                 parsed_end_date = datetime.strptime(end_month, "%Y-%m-%d")
@@ -1894,17 +1843,18 @@ class FinanceDashboard:
             filtered_monthly_summary = self.dataset_loader.filter_monthly_dataset(
                 "monthly_summary_path", start_month_str, end_month_str
             )
+
+            # For the savings metrics, use all data from the beginning up to the selected end date
+            filtered_savings_metrics = self.dataset_loader.filter_monthly_dataset(
+                "savings_metrics_path", self.dataset_loader.min_month, end_month_str
+            )
+
             filtered_expenses_stacked = self.dataset_loader.filter_monthly_dataset(
                 "expenses_stacked_path", start_month_str, end_month_str
             )
             filtered_income_stacked = self.dataset_loader.filter_monthly_dataset(
                 "income_stacked_path", start_month_str, end_month_str
             )
-            filtered_savings_metrics = self.dataset_loader.filter_monthly_dataset(
-                "savings_metrics_path", start_month_str, end_month_str
-            )
-
-            # Filter daily datasets
             filtered_processed_savings = self.dataset_loader.filter_daily_dataset(
                 "processed_savings_path", parsed_start_date, parsed_end_date
             )
@@ -1928,15 +1878,17 @@ class FinanceDashboard:
                 )
             )
 
-            # Create dashboard elements
+            # Create unified summary cards with both financial and savings data
             summary_cards = self.card_creator.create_summary_cards(
-                filtered_monthly_summary
+                filtered_monthly_summary, filtered_savings_metrics
             )
+
+            # Create all other dashboard elements
             fig_main_overview = self.chart_factory.create_monthly_overview(
                 filtered_monthly_summary
             )
 
-            # Create category visualizations using filtered data for the selected time period
+            # Create category visualizations
             fig_expense_pie_chart = self.chart_factory.create_category_donut(
                 filtered_expenses_by_category,
                 "Expense Breakdown by Category",
@@ -1958,20 +1910,18 @@ class FinanceDashboard:
                 is_income=True,
             )
 
-            # Create savings elements
-            savings_cards = self.card_creator.create_savings_cards(
+            # Create savings elements - THIS WAS MISSING
+            fig_savings_overview = self.chart_factory.create_savings_overview(
                 filtered_savings_metrics
             )
-            fig_savings = self.chart_factory.create_savings_overview(
-                filtered_savings_metrics
-            )
+
             fig_savings_breakdown = self.chart_factory.create_savings_breakdown(
                 self.dataset_loader.get_dataset("savings_by_category")
             )
             fig_savings_allocation = self.chart_factory.create_savings_allocation(
                 self.dataset_loader.get_dataset("savings_allocation")
             )
-            savings_table = self.chart_factory.create_savings_table(
+            savings_table = self.card_creator.create_savings_table(
                 filtered_processed_savings
             )
 
@@ -1982,8 +1932,7 @@ class FinanceDashboard:
                 fig_income_pie_chart,
                 fig_stacked_expenses,
                 fig_stacked_income,
-                savings_cards,
-                fig_savings,
+                fig_savings_overview,
                 fig_savings_breakdown,
                 fig_savings_allocation,
                 savings_table,
