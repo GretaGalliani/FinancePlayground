@@ -1287,24 +1287,19 @@ class ChartFactory:
         df_savings: Optional[pl.DataFrame],
     ) -> go.Figure:
         """
-        Create a savings overview area chart divided by category.
+        Create a savings overview area chart showing each savings category's balance over time.
 
         Args:
             df_savings_metrics: DataFrame with savings metrics over time
             df_savings: DataFrame with detailed savings transactions
 
         Returns:
-            go.Figure: Area chart showing savings by category over time
+            go.Figure: Area chart showing category balances over time
         """
-        if (
-            df_savings_metrics is None
-            or len(df_savings_metrics) == 0
-            or df_savings is None
-            or len(df_savings) == 0
-        ):
+        if df_savings is None or len(df_savings) == 0:
             fig = go.Figure()
             fig.update_layout(
-                title="Savings Overview by Category - No Data Available",
+                title="Savings Categories Over Time - No Data Available",
                 yaxis=dict(title="Amount (€)"),
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
@@ -1320,13 +1315,13 @@ class ChartFactory:
             )
             return fig
 
-        # Process savings data to aggregate by month and category for Risparmio categories only
+        # Filter for "Risparmio" categories only
         df_risparmio = df_savings.filter(pl.col("CategoryType") == "Risparmio")
 
         if len(df_risparmio) == 0:
             fig = go.Figure()
             fig.update_layout(
-                title="Savings Overview by Category - No Savings Data Available",
+                title="Savings Categories Over Time - No Savings Data Available",
                 yaxis=dict(title="Amount (€)"),
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
@@ -1348,8 +1343,8 @@ class ChartFactory:
                 pl.col("Date").dt.strftime("%Y-%m").alias("Month")
             )
 
-        # Group by month and category, calculate cumulative value for each category
-        months = sorted(df_savings_metrics["Month"].to_list())
+        # Get all months and categories
+        months = sorted(df_risparmio["Month"].unique().to_list())
         categories = sorted(df_risparmio["Category"].unique().to_list())
 
         # Get consistent colors for savings categories
@@ -1358,34 +1353,30 @@ class ChartFactory:
             for cat in categories
         }
 
-        # Calculate cumulative sum for each category by month
-        monthly_category_data = {}
+        # Calculate end-of-month balance for each category
+        monthly_balances = {}
+        category_balances = {cat: 0.0 for cat in categories}
 
-        for category in categories:
-            category_data = []
-            running_total = 0
+        for month in months:
+            # Update balances for each category based on this month's transactions
+            month_data = df_risparmio.filter(pl.col("Month") == month)
 
-            for month in months:
-                # Filter data for this category and month
-                month_data = df_risparmio.filter(
-                    (pl.col("Month") <= month) & (pl.col("Category") == category)
-                )
+            for category in categories:
+                # Calculate net change for this category in this month
+                cat_data = month_data.filter(pl.col("Category") == category)
+                if len(cat_data) > 0:
+                    net_change = cat_data["Value"].sum()
+                    category_balances[category] += net_change
 
-                if len(month_data) > 0:
-                    # Calculate net savings for this category (account for withdrawals)
-                    month_value = month_data["Value"].sum()
-                    running_total += month_value
+            # Store a copy of the current balances for this month
+            monthly_balances[month] = category_balances.copy()
 
-                category_data.append({"month": month, "value": running_total})
-
-            monthly_category_data[category] = category_data
-
-        # Create figure with one area trace per category
+        # Create figure with traces for each category
         fig = go.Figure()
 
         for category in categories:
-            x_values = [item["month"] for item in monthly_category_data[category]]
-            y_values = [item["value"] for item in monthly_category_data[category]]
+            x_values = months
+            y_values = [monthly_balances[month][category] for month in months]
 
             fig.add_trace(
                 go.Scatter(
@@ -1401,9 +1392,11 @@ class ChartFactory:
             )
 
         # Style the figure
-        fig = self.chart_styler.apply_styling(fig, "Savings Categories Over Time")
+        fig = self.chart_styler.apply_styling(
+            fig, "Savings Categories Balance Over Time"
+        )
         fig.update_layout(
-            yaxis=dict(title="Cumulative Amount (€)"),
+            yaxis=dict(title="Balance Amount (€)"),
             hovermode="x unified",
             legend=dict(
                 orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5
@@ -1413,13 +1406,14 @@ class ChartFactory:
         return fig
 
     def create_category_savings_breakdown(
-        self, df_savings: Optional[pl.DataFrame]
+        self, df_savings: Optional[pl.DataFrame], end_date: datetime
     ) -> go.Figure:
         """
-        Create a pie chart showing the breakdown of savings categories at the latest month.
+        Create a pie chart showing the breakdown of savings categories at the latest selected month.
 
         Args:
             df_savings: DataFrame with savings data
+            end_date: End date of the selected period
 
         Returns:
             go.Figure: Pie chart showing savings categories breakdown
@@ -1469,43 +1463,64 @@ class ChartFactory:
                 pl.col("Date").dt.strftime("%Y-%m").alias("Month")
             )
 
-        # Get the latest month
-        latest_month = df_risparmio["Month"].max()
+        # Get the end month in "YYYY-MM" format
+        end_month = end_date.strftime("%Y-%m")
+        self.logger.info(f"Generating savings breakdown as of: {end_month}")
 
-        # Calculate the category totals for all data up to the latest month
-        categories = (
-            df_risparmio.filter(pl.col("Month") <= latest_month)["Category"]
-            .unique()
-            .to_list()
-        )
+        # Get all months up to and including the end month
+        all_months = sorted(df_risparmio["Month"].unique().to_list())
+        relevant_months = [month for month in all_months if month <= end_month]
 
-        # Prepare data for the pie chart
+        if not relevant_months:
+            fig = go.Figure()
+            fig.update_layout(
+                title=f"Savings Breakdown by Category - No Data Until {end_month}",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text=f"No savings data available up to {end_month}",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Get all savings categories
+        categories = df_risparmio["Category"].unique().to_list()
+
+        # Calculate category balances as of the end month
+        category_balances = {cat: 0.0 for cat in categories}
+
+        # Process all transactions up to and including the end month
+        for category in categories:
+            category_data = df_risparmio.filter(
+                (pl.col("Month").is_in(relevant_months))
+                & (pl.col("Category") == category)
+            )
+            if len(category_data) > 0:
+                net_change = category_data["Value"].sum()
+                category_balances[category] += net_change
+
+        # Filter out categories with zero or negative balances for the pie chart
         labels = []
         values = []
         colors = []
 
-        # Calculate the total for each category
-        for category in categories:
-            category_data = df_risparmio.filter(
-                (pl.col("Category") == category) & (pl.col("Month") <= latest_month)
-            )
-
-            if len(category_data) > 0:
-                total_value = category_data["Value"].sum()
-
-                # Only include categories with positive values
-                if total_value > 0:
-                    labels.append(category)
-                    values.append(total_value)
-                    colors.append(
-                        self.category_mapper.get_savings_category_color(category)
-                    )
+        for category, balance in category_balances.items():
+            if balance > 0:
+                labels.append(category)
+                values.append(balance)
+                colors.append(self.category_mapper.get_savings_category_color(category))
 
         # If we have no positive values, display a message
         if not values or sum(values) == 0:
             fig = go.Figure()
             fig.update_layout(
-                title="Savings Breakdown by Category - No Positive Savings",
+                title=f"Savings Breakdown by Category as of {end_month} - No Positive Savings",
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
@@ -1544,7 +1559,7 @@ class ChartFactory:
 
         # Style the figure
         fig = self.chart_styler.apply_styling(
-            fig, f"Savings Breakdown as of {latest_month}"
+            fig, f"Savings Breakdown as of {end_month}"
         )
 
         # Update specific pie chart styling
@@ -2078,8 +2093,10 @@ class FinanceDashboard:
             filtered_income_stacked = self.dataset_loader.filter_monthly_dataset(
                 "income_stacked_path", start_month_str, end_month_str
             )
+
+            # For savings data, include all transactions up to the end date
             filtered_processed_savings = self.dataset_loader.filter_daily_dataset(
-                "processed_savings_path", parsed_start_date, parsed_end_date
+                "processed_savings_path", self.dataset_loader.min_date, parsed_end_date
             )
 
             # Calculate category breakdowns based on the filtered date range
@@ -2133,19 +2150,22 @@ class FinanceDashboard:
                 is_income=True,
             )
 
-            # Create savings elements - THIS WAS MISSING
+            # Create savings elements
             fig_savings_overview = self.chart_factory.create_savings_overview_area(
                 filtered_savings_metrics, filtered_processed_savings
             )
 
+            # Pass the end date to the savings breakdown method
             fig_savings_breakdown = (
                 self.chart_factory.create_category_savings_breakdown(
-                    filtered_processed_savings
+                    filtered_processed_savings, parsed_end_date
                 )
             )
+
             fig_savings_allocation = self.chart_factory.create_savings_allocation(
                 self.dataset_loader.get_dataset("savings_allocation")
             )
+
             savings_table = self.card_creator.create_savings_table(
                 filtered_processed_savings
             )
