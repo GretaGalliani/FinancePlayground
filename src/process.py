@@ -435,7 +435,7 @@ class AnalyticsGenerator:
 
     def calculate_savings_metrics(self, df_savings: pl.DataFrame) -> pl.DataFrame:
         """
-        Calculate savings metrics by month.
+        Calculate savings metrics by month, correctly handling withdrawals.
 
         Args:
             df_savings: Processed savings DataFrame
@@ -481,11 +481,9 @@ class AnalyticsGenerator:
             # Get data for this month
             month_data = df_processed.filter(pl.col("Month") == month)
 
-            # Calculate savings (positive values in Risparmio categories)
+            # Calculate net savings (including withdrawals from Risparmio categories)
             month_savings = (
-                month_data.filter(
-                    (pl.col("CategoryType") == "Risparmio") & (pl.col("Value") > 0)
-                )["Value"].sum()
+                month_data.filter(pl.col("CategoryType") == "Risparmio")["Value"].sum()
                 or 0.0
             )
             total_savings += month_savings
@@ -511,14 +509,14 @@ class AnalyticsGenerator:
                 total_allocated + month_allocated - month_allocated_withdrawals
             )
 
-            # Calculate spent funds (withdrawals from non-Accantonamento categories)
-            month_spent = abs(
+            # Calculate spent funds from savings (withdrawals from Risparmio categories)
+            month_spent_from_savings = abs(
                 month_data.filter(
-                    (pl.col("CategoryType") != "Accantonamento") & (pl.col("Value") < 0)
+                    (pl.col("CategoryType") == "Risparmio") & (pl.col("Value") < 0)
                 )["Value"].sum()
                 or 0.0
             )
-            total_spent += month_spent
+            total_spent += month_spent_from_savings
 
             # Store monthly metrics
             metrics.append(
