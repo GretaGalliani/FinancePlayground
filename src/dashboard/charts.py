@@ -936,18 +936,14 @@ class ChartFactory:
 
         # Update layout with dual y-axes and stacked bars
         fig.update_layout(
-            barmode="stack",  # Stack the category bars
+            barmode="relative",  # Stack positive above 0, negative below 0
             yaxis=dict(
                 title="Savings Rate (%)",
-                titlefont=dict(color=self.color_theme["savings"]["total"]),
-                tickfont=dict(color=self.color_theme["savings"]["total"]),
                 tickformat=".1f",
                 side="left",
             ),
             yaxis2=dict(
                 title="Amount Saved by Category (€)",
-                titlefont=dict(color=self.color_theme["income"]),
-                tickfont=dict(color=self.color_theme["income"]),
                 tickformat="€,.0f",
                 overlaying="y",
                 side="right",
@@ -961,6 +957,11 @@ class ChartFactory:
                 x=0.5,
             ),
         )
+
+        # Ensure the line trace renders on top by setting higher zorder
+        # Bar traces get default zorder, scatter trace gets higher zorder to appear on top
+        fig.update_traces(selector=dict(type="scatter"), zorder=10)
+        fig.update_traces(selector=dict(type="bar"), zorder=1)
 
         return fig
 
