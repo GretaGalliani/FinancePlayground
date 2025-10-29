@@ -244,8 +244,8 @@ def setup_callbacks(dashboard_instance) -> None:
             Output("stacked-income", "figure"),
             Output("savings-overview", "figure"),
             Output("savings-breakdown", "figure"),
-            Output("savings-allocation", "figure"),
-            Output("savings-table", "children"),
+            Output("monthly-savings-rate", "figure"),
+            Output("allocation-vs-risparmio", "figure"),
         ],
         [
             Input("start-month-dropdown", "value"),
@@ -386,14 +386,20 @@ def setup_callbacks(dashboard_instance) -> None:
             )
         )
 
-        fig_savings_allocation = (
-            dashboard_instance.chart_factory.create_savings_allocation(
-                dashboard_instance.dataset_loader.get_dataset("savings_allocation")
+        # Create new Monthly Savings Rate chart with detailed savings data
+        fig_monthly_savings_rate = (
+            dashboard_instance.chart_factory.create_monthly_savings_rate(
+                filtered_monthly_summary,
+                filtered_savings_metrics,
+                filtered_processed_savings,
             )
         )
 
-        savings_table = dashboard_instance.card_creator.create_savings_table(
-            filtered_processed_savings
+        # Create new Allocation Breakdown by Category chart
+        fig_allocation_vs_risparmio = (
+            dashboard_instance.chart_factory.create_allocation_breakdown_by_category(
+                filtered_processed_savings, parsed_end_date
+            )
         )
 
         return (
@@ -405,6 +411,6 @@ def setup_callbacks(dashboard_instance) -> None:
             fig_stacked_income,
             fig_savings_overview,
             fig_savings_breakdown,
-            fig_savings_allocation,
-            savings_table,
+            fig_monthly_savings_rate,
+            fig_allocation_vs_risparmio,
         )

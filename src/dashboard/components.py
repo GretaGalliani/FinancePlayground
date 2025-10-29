@@ -93,13 +93,19 @@ class CardCreator:
         ):
             try:
                 # Get the latest month's metrics
-                latest_month = df_savings_metrics["Month"].max()
+                latest_month_raw = df_savings_metrics["Month"].max()
                 latest_metrics = df_savings_metrics.filter(
-                    pl.col("Month") == latest_month
+                    pl.col("Month") == latest_month_raw
                 )
 
                 if len(latest_metrics) > 0 and "TotalSavings" in latest_metrics.columns:
                     total_savings = latest_metrics["TotalSavings"][0]
+
+                # Format month as "Month Year" (e.g., "October 2025")
+                from datetime import datetime
+
+                month_date = datetime.strptime(f"{latest_month_raw}-01", "%Y-%m-%d")
+                latest_month = month_date.strftime("%B %Y")
             except Exception as e:
                 # Handle any unexpected errors silently
                 pass

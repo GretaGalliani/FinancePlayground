@@ -286,7 +286,7 @@ class DashboardLayout:
                         ),
                         dbc.Tab(
                             [
-                                # Removed savings cards since they're now in the main summary cards
+                                # Top row: Savings Categories Balance Over Time + Savings Breakdown
                                 dbc.Row(
                                     [
                                         dbc.Col(
@@ -298,13 +298,29 @@ class DashboardLayout:
                                     ],
                                     className="mb-4",
                                 ),
-                                dcc.Graph(id="savings-allocation"),
-                                html.H4(
-                                    "Savings Transactions",
-                                    className="mt-4 mb-3",
-                                    style=heading_style,
+                                # Middle row: Monthly Savings Rate (full width)
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="monthly-savings-rate"),
+                                            width=12,
+                                        ),
+                                    ],
+                                    className="mb-4",
                                 ),
-                                html.Div(id="savings-table"),
+                                # Bottom row: Allocation vs Free Savings Distribution (full width)
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(
+                                                id="allocation-vs-risparmio",
+                                                style={"height": "300px"},
+                                            ),
+                                            width=12,
+                                        ),
+                                    ],
+                                    className="mb-4",
+                                ),
                             ],
                             label="Savings",
                             tab_id="savings-tab",

@@ -699,22 +699,288 @@ class ChartFactory:
 
         return fig
 
-    def create_savings_allocation(
-        self, df_savings_allocation: Optional[pl.DataFrame]
+    def create_monthly_savings_rate(
+        self,
+        df_monthly_summary: Optional[pl.DataFrame],
+        df_savings_metrics: Optional[pl.DataFrame],
+        df_processed_savings: Optional[pl.DataFrame] = None,
     ) -> go.Figure:
         """
-        Create a grouped bar chart comparing allocated vs spent savings with consistent colors.
+        Create a monthly savings rate chart showing percentage and absolute amounts.
 
         Args:
-            df_savings_allocation: DataFrame with savings allocation data
+            df_monthly_summary: DataFrame with monthly income data
+            df_savings_metrics: DataFrame with monthly savings data
+            df_processed_savings: DataFrame with detailed savings transactions by category
 
         Returns:
             go.Figure: Plotly figure for the dashboard
         """
-        if df_savings_allocation is None or len(df_savings_allocation) == 0:
+        if (
+            df_monthly_summary is None
+            or len(df_monthly_summary) == 0
+            or df_savings_metrics is None
+            or len(df_savings_metrics) == 0
+        ):
             fig = go.Figure()
             fig.update_layout(
-                title="Allocation Status - No Data Available",
+                title="Monthly Savings Rate - No Data Available",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No data available for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Merge income and savings data by month
+        df_merged = df_monthly_summary.join(df_savings_metrics, on="Month", how="inner")
+
+        # Filter out months with no income (cannot calculate rate)
+        df_merged = df_merged.filter(pl.col("Income") > 0)
+
+        if len(df_merged) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Monthly Savings Rate - No Income Data",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No income data available to calculate savings rate",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Get months and income
+        months = df_merged["Month"].to_list()
+        total_savings = df_merged["TotalSavings"].to_list()
+        income = df_merged["Income"].to_list()
+
+        # Calculate monthly total savings amounts (for percentage calculation)
+        monthly_savings_totals = []
+        for i, month in enumerate(months):
+            if i == 0:
+                # First month: Calculate from the beginning of data
+                all_savings = df_savings_metrics.filter(pl.col("Month") <= months[0])
+                if len(all_savings) > 1:
+                    prev_total = all_savings["TotalSavings"][-2]
+                    monthly_amount = total_savings[i] - prev_total
+                else:
+                    monthly_amount = 0
+            else:
+                # Subsequent months: difference from previous month
+                monthly_amount = total_savings[i] - total_savings[i - 1]
+            monthly_savings_totals.append(monthly_amount)
+
+        # Calculate savings rate as percentage
+        savings_rates = [
+            (saved / inc * 100) if inc > 0 else 0
+            for saved, inc in zip(monthly_savings_totals, income)
+        ]
+
+        # Calculate savings by category for stacked bar
+        category_data = {}
+        if df_processed_savings is not None and len(df_processed_savings) > 0:
+            # Ensure we have Month column
+            if "Month" not in df_processed_savings.columns:
+                df_processed_savings = df_processed_savings.with_columns(
+                    pl.col("Date").dt.strftime("%Y-%m").alias("Month")
+                )
+
+            # Filter for Risparmio only (not Accantonamento)
+            df_risparmio = df_processed_savings.filter(
+                pl.col("CategoryType") == "Risparmio"
+            )
+
+            # Get all unique categories
+            all_categories = df_risparmio["Category"].unique().to_list()
+
+            # For each category, calculate monthly amounts
+            for category in all_categories:
+                category_monthly_values = []
+
+                for month in months:
+                    # Get savings for this month and category
+                    month_cat_savings = df_risparmio.filter(
+                        (pl.col("Month") == month) & (pl.col("Category") == category)
+                    )
+
+                    if len(month_cat_savings) > 0:
+                        monthly_value = month_cat_savings["Value"].sum()
+                        category_monthly_values.append(monthly_value)
+                    else:
+                        category_monthly_values.append(0)
+
+                category_data[category] = category_monthly_values
+        else:
+            # No detailed savings data, create single category
+            category_data["Savings"] = monthly_savings_totals
+
+        # Format months for display
+        display_months = []
+        for month_str in months:
+            year, month = month_str.split("-")
+            month_name = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ][int(month) - 1]
+            display_months.append(f"{month_name} {year}")
+
+        # Create combined data for unified hover
+        combined_data = []
+        rate_color = self.color_theme["savings"]["total"]
+
+        # Build category colors dict and create safe keys for customdata
+        category_colors_dict = {}
+        category_key_mapping = {}  # Map safe keys to display names
+        for idx, category in enumerate(category_data.keys()):
+            safe_key = f"cat_{idx}"  # Use safe keys without spaces
+            category_key_mapping[safe_key] = category
+
+            if category == "Savings":
+                category_colors_dict[safe_key] = self.color_theme["income"]
+            else:
+                category_colors_dict[
+                    safe_key
+                ] = self.category_mapper.get_savings_category_color(category)
+
+        # Create reverse mapping: category name -> safe key
+        category_to_safe_key = {v: k for k, v in category_key_mapping.items()}
+
+        for i, month in enumerate(display_months):
+            month_data = {
+                "month": month,
+                "rate": savings_rates[i],
+            }
+            # Add each category's value with safe keys
+            for safe_key, category in category_key_mapping.items():
+                values = category_data[category]
+                month_data[safe_key] = values[i]
+            combined_data.append(month_data)
+
+        # Create unified hover template with colored squares
+        hover_template_parts = ["<b>%{customdata.month}</b><br>"]
+        hover_template_parts.append(
+            f"<span style='color:{rate_color}; font-size:22px;'>■</span> Savings Rate: %{{customdata.rate:.1f}}%<br>"
+        )
+        for safe_key, display_name in category_key_mapping.items():
+            color = category_colors_dict[safe_key]
+            hover_template_parts.append(
+                f"<span style='color:{color}; font-size:22px;'>■</span> {display_name}: %{{customdata.{safe_key}:,.2f}}€<br>"
+            )
+        # Remove last <br> and add closing tag
+        hover_template = "".join(hover_template_parts)[:-4] + "<extra></extra>"
+
+        # Create figure with secondary y-axis
+        fig = go.Figure()
+
+        # FIRST: Add stacked bars for each savings category (secondary y-axis)
+        for category, values in category_data.items():
+            safe_key = category_to_safe_key[category]  # Get the safe key
+            cat_color = category_colors_dict[safe_key]  # Use safe key for color lookup
+
+            fig.add_trace(
+                go.Bar(
+                    x=display_months,
+                    y=values,
+                    name=category,
+                    marker_color=cat_color,
+                    marker_line_color=cat_color,
+                    marker_line_width=1.5,
+                    opacity=0.9,
+                    customdata=combined_data,
+                    hovertemplate=hover_template,
+                    yaxis="y2",
+                )
+            )
+
+        # SECOND: Add savings rate line (primary y-axis) AFTER bars so it renders on top
+        fig.add_trace(
+            go.Scatter(
+                x=display_months,
+                y=savings_rates,
+                name="Savings Rate (%)",
+                line=dict(color=rate_color, width=3),
+                mode="lines+markers",
+                marker=dict(size=8, color=rate_color),
+                customdata=combined_data,
+                hovertemplate=hover_template,
+                yaxis="y1",
+            )
+        )
+
+        # Apply styling
+        fig = self.chart_styler.apply_styling(fig, "Monthly Savings Rate")
+
+        # Update layout with dual y-axes and stacked bars
+        fig.update_layout(
+            barmode="stack",  # Stack the category bars
+            yaxis=dict(
+                title="Savings Rate (%)",
+                titlefont=dict(color=self.color_theme["savings"]["total"]),
+                tickfont=dict(color=self.color_theme["savings"]["total"]),
+                tickformat=".1f",
+                side="left",
+            ),
+            yaxis2=dict(
+                title="Amount Saved by Category (€)",
+                titlefont=dict(color=self.color_theme["income"]),
+                tickfont=dict(color=self.color_theme["income"]),
+                tickformat="€,.0f",
+                overlaying="y",
+                side="right",
+            ),
+            hovermode="closest",  # Use closest to avoid text repetition
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.2,
+                xanchor="center",
+                x=0.5,
+            ),
+        )
+
+        return fig
+
+    def create_allocation_breakdown_by_category(
+        self, df_savings: Optional[pl.DataFrame], end_date: datetime
+    ) -> go.Figure:
+        """
+        Create a horizontal bar chart showing allocation amounts by category.
+
+        Args:
+            df_savings: DataFrame with savings data
+            end_date: End date of the selected period
+
+        Returns:
+            go.Figure: Plotly figure for the dashboard
+        """
+        if df_savings is None or len(df_savings) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Allocation Breakdown - No Data Available",
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
@@ -729,51 +995,143 @@ class ChartFactory:
             )
             return fig
 
-        # Get unique categories and types for plotting
-        plot_categories = df_savings_allocation["Category"].unique().to_list()
-        plot_types = df_savings_allocation["Type"].unique().to_list()
+        # Ensure we have Month column
+        if "Month" not in df_savings.columns:
+            df_savings = df_savings.with_columns(
+                pl.col("Date").dt.strftime("%Y-%m").alias("Month")
+            )
 
-        # Build a figure with grouped bars
+        # Get the end month in "YYYY-MM" format
+        end_month = end_date.strftime("%Y-%m")
+
+        # Get all months up to and including the end month
+        all_months = sorted(df_savings["Month"].unique().to_list())
+        relevant_months = [month for month in all_months if month <= end_month]
+
+        if not relevant_months:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Allocation Breakdown - No Data",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text=f"No savings data available up to {end_month}",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Filter only Allocations (Accantonamento)
+        df_filtered = df_savings.filter(
+            (pl.col("Month").is_in(relevant_months))
+            & (pl.col("CategoryType") == "Accantonamento")
+        )
+
+        if len(df_filtered) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Allocation Breakdown - No Allocations",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No allocations found for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Group by Category and sum the values
+        df_grouped = df_filtered.group_by("Category").agg(
+            pl.col("Value").sum().alias("Balance")
+        )
+
+        # Filter out categories with zero or negative balance
+        df_grouped = df_grouped.filter(pl.col("Balance") > 0)
+
+        if len(df_grouped) == 0:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Allocation Breakdown - No Positive Allocations",
+                plot_bgcolor=self.color_theme["background"],
+                annotations=[
+                    dict(
+                        text="No positive allocations for selected period",
+                        showarrow=False,
+                        xref="paper",
+                        yref="paper",
+                        x=0.5,
+                        y=0.5,
+                    )
+                ],
+            )
+            return fig
+
+        # Sort by balance descending for better visualization (highest first)
+        df_grouped = df_grouped.sort("Balance", descending=True)
+
+        categories = df_grouped["Category"].to_list()
+        balances = df_grouped["Balance"].to_list()
+
+        # Get colors for categories using the category mapper
+        colors = [
+            self.category_mapper.get_savings_category_color(cat) for cat in categories
+        ]
+
+        # Create vertical bar chart
         fig = go.Figure()
 
-        # Colors for different types
-        colors = {
-            "Saved": self.color_theme["income"],
-            "Allocated": self.color_theme["savings"]["allocation"],
-            "Spent from Savings": self.color_theme["expense"],
-            "Spent from Allocations": "#FFA07A",  # Light salmon color
-        }
+        # Set bar width based on number of categories
+        bar_width = 0.3 if len(categories) == 1 else None
 
-        for allocation_type in plot_types:
-            filtered_data = df_savings_allocation.filter(
-                pl.col("Type") == allocation_type
+        # Create hover template with colored square
+        hover_texts = []
+        for category, balance, color in zip(categories, balances, colors):
+            hover_text = (
+                f"<b>{category}</b><br>"
+                f"<span style='color:{color}; font-size:22px;'>■</span> Amount: €{balance:,.2f}"
             )
+            hover_texts.append(hover_text)
 
-            # Create a dict of values by category
-            values_by_category = {}
-            for category in plot_categories:
-                match = filtered_data.filter(pl.col("Category") == category)
-                values_by_category[category] = (
-                    match["Value"][0] if len(match) > 0 else 0
-                )
-
-            # Add bar trace
-            fig.add_trace(
-                go.Bar(
-                    name=allocation_type,
-                    x=list(values_by_category.keys()),
-                    y=list(values_by_category.values()),
-                    marker_color=colors.get(
-                        allocation_type, "#808080"
-                    ),  # Default gray if type not found
-                )
+        fig.add_trace(
+            go.Bar(
+                x=categories,
+                y=balances,
+                marker=dict(color=colors),
+                text=[f"€{bal:,.0f}" for bal in balances],
+                textposition="outside",
+                textfont=dict(size=11),
+                hovertext=hover_texts,
+                hoverinfo="text",
+                width=bar_width,
             )
+        )
 
-        fig = self.chart_styler.apply_styling(fig, "Allocation Status by Category")
+        # Apply styling with simple title
+        fig = self.chart_styler.apply_styling(fig, "Allocation Breakdown")
+
+        # Update layout for vertical bar chart
         fig.update_layout(
-            yaxis=dict(title="Amount (€)"),
-            barmode="group",
-            legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+            xaxis=dict(
+                title="",
+                tickfont=dict(size=11),
+            ),
+            yaxis=dict(
+                title="Amount (€)",
+                tickformat="€,.0f",
+            ),
+            height=350,
+            showlegend=False,
+            margin=dict(l=50, r=50, t=80, b=100),
         )
 
         return fig
