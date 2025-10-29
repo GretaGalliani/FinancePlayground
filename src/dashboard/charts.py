@@ -194,7 +194,7 @@ class ChartFactory:
                     labels=labels,
                     values=values,
                     hole=0.6,  # Keep large hole for elegant donut
-                    textinfo="label",  # Show only category labels
+                    textinfo="label",  # Show category labels on chart
                     marker=dict(colors=colors),
                     textposition="outside",
                     textfont=dict(size=12),
@@ -220,9 +220,6 @@ class ChartFactory:
                 yanchor="top",
                 x=0.5,
                 xanchor="center",
-                # Make the legend span most of the width
-                entrywidth=90,
-                # Force it outside
                 bordercolor="#E2E8F0",
                 borderwidth=1,
             ),
