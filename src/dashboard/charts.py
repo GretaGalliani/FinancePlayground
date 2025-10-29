@@ -585,8 +585,10 @@ class ChartFactory:
                 pl.col("Date").dt.strftime("%Y-%m").alias("Month")
             )
 
-        # Get the end month in "YYYY-MM" format
+        # Get the end month in "YYYY-MM" format for filtering
         end_month = end_date.strftime("%Y-%m")
+        # Format for display: "Month Year" (e.g., "October 2025")
+        end_month_display = end_date.strftime("%B %Y")
         self.logger.info("Generating savings breakdown as of: %s", end_month)
 
         # Get all months up to and including the end month
@@ -596,7 +598,7 @@ class ChartFactory:
         if not relevant_months:
             fig = go.Figure()
             fig.update_layout(
-                title=f"Savings Breakdown by Category - No Data Until {end_month}",
+                title=f"Savings Breakdown as of {end_month_display} - No Data",
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
@@ -642,7 +644,7 @@ class ChartFactory:
         if not values or sum(values) == 0:
             fig = go.Figure()
             fig.update_layout(
-                title=f"Savings Breakdown by Category as of {end_month} - No Positive Savings",
+                title=f"Savings Breakdown as of {end_month_display} - No Positive Savings",
                 plot_bgcolor=self.color_theme["background"],
                 annotations=[
                     dict(
@@ -671,7 +673,7 @@ class ChartFactory:
                     values=values,
                     hole=0.4,
                     marker=dict(colors=colors),
-                    textinfo="percent",
+                    textinfo="none",  # Don't show text on chart to avoid overlap
                     hoverinfo="text",
                     hovertext=hover_texts,
                     textfont=dict(size=14),
@@ -679,9 +681,9 @@ class ChartFactory:
             ]
         )
 
-        # Style the figure
+        # Style the figure with formatted date
         fig = self.chart_styler.apply_styling(
-            fig, f"Savings Breakdown as of {end_month}"
+            fig, f"Savings Breakdown as of {end_month_display}"
         )
 
         # Update specific pie chart styling
