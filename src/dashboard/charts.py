@@ -1089,13 +1089,10 @@ class ChartFactory:
         # Set bar width based on number of categories
         bar_width = 0.3 if len(categories) == 1 else None
 
-        # Create hover template with colored square
+        # Create hover template
         hover_texts = []
-        for category, balance, color in zip(categories, balances, colors):
-            hover_text = (
-                f"<b>{category}</b><br>"
-                f"<span style='color:{color}; font-size:22px;'>■</span> Amount: €{balance:,.2f}"
-            )
+        for category, balance in zip(categories, balances):
+            hover_text = f"<b>{category}</b><br>" f"Amount: €{balance:,.2f}"
             hover_texts.append(hover_text)
 
         fig.add_trace(
