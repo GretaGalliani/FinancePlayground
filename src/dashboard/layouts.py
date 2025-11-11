@@ -327,6 +327,120 @@ class DashboardLayout:
                             style=tab_style,
                             active_tab_style=active_tab_style,
                         ),
+                        dbc.Tab(
+                            [
+                                # Section Header: Overall Statistics
+                                html.H3(
+                                    "Overall Statistics",
+                                    style={
+                                        "fontFamily": f'"{title_font}", sans-serif',
+                                        "fontWeight": "700",
+                                        "color": self.color_theme.get(
+                                            "headline", "#6C3BCE"
+                                        ),
+                                        "marginTop": "1.5rem",
+                                        "marginBottom": "1rem",
+                                        "textAlign": "center",
+                                    },
+                                ),
+                                # Statistics row 1: Average vs Median (full width)
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="statistics-summary-chart"),
+                                            width=12,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
+                                # Statistics row 2: Two charts side by side
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="prediction-scenarios-chart"),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                        dbc.Col(
+                                            dcc.Graph(id="current-vs-typical-month"),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
+                                # Section Divider
+                                html.Hr(
+                                    style={
+                                        "borderTop": (
+                                            f"3px solid "
+                                            f"{self.color_theme.get('headline', '#6C3BCE')}"
+                                        ),
+                                        "marginTop": "2rem",
+                                        "marginBottom": "2rem",
+                                        "width": "80%",
+                                        "marginLeft": "auto",
+                                        "marginRight": "auto",
+                                    }
+                                ),
+                                # Section Header: Current Month Analysis
+                                html.H3(
+                                    "Current Month Analysis",
+                                    style={
+                                        "fontFamily": f'"{title_font}", sans-serif',
+                                        "fontWeight": "700",
+                                        "color": self.color_theme.get(
+                                            "headline", "#6C3BCE"
+                                        ),
+                                        "marginBottom": "1rem",
+                                        "textAlign": "center",
+                                    },
+                                ),
+                                # Current month row: Category vs typical comparisons
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(
+                                                id="expense-category-vs-typical",
+                                                style={"height": "500px"},
+                                            ),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                        dbc.Col(
+                                            dcc.Graph(
+                                                id="income-category-vs-typical",
+                                                style={"height": "500px"},
+                                            ),
+                                            width=6,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
+                                # Category statistics rows (full width)
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="expense-category-statistics"),
+                                            width=12,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            dcc.Graph(id="income-category-statistics"),
+                                            width=12,
+                                            className="mb-4",
+                                        ),
+                                    ]
+                                ),
+                            ],
+                            label="Statistics & Predictions",
+                            tab_id="predictions-tab",
+                            style=tab_style,
+                            active_tab_style=active_tab_style,
+                        ),
                     ],
                     id="dashboard-tabs",
                     active_tab="expenses-tab",

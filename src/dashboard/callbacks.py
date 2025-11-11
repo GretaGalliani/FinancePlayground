@@ -246,6 +246,13 @@ def setup_callbacks(dashboard_instance) -> None:
             Output("savings-breakdown", "figure"),
             Output("monthly-savings-rate", "figure"),
             Output("allocation-vs-risparmio", "figure"),
+            Output("statistics-summary-chart", "figure"),
+            Output("prediction-scenarios-chart", "figure"),
+            Output("current-vs-typical-month", "figure"),
+            Output("expense-category-vs-typical", "figure"),
+            Output("income-category-vs-typical", "figure"),
+            Output("expense-category-statistics", "figure"),
+            Output("income-category-statistics", "figure"),
         ],
         [
             Input("start-month-dropdown", "value"),
@@ -402,6 +409,63 @@ def setup_callbacks(dashboard_instance) -> None:
             )
         )
 
+        # Create statistics and predictions tab elements
+        fig_statistics_summary = (
+            dashboard_instance.chart_factory.create_statistics_summary_chart(
+                filtered_monthly_summary
+            )
+        )
+
+        fig_prediction_scenarios = (
+            dashboard_instance.chart_factory.create_prediction_scenarios_chart(
+                filtered_monthly_summary
+            )
+        )
+
+        fig_current_vs_typical = (
+            dashboard_instance.chart_factory.create_current_vs_typical_month(
+                filtered_monthly_summary
+            )
+        )
+
+        # Filter processed expenses and income for category statistics
+        filtered_processed_expenses = (
+            dashboard_instance.dataset_loader.filter_daily_dataset(
+                "processed_expenses_path", parsed_start_date, parsed_end_date
+            )
+        )
+        filtered_processed_income = (
+            dashboard_instance.dataset_loader.filter_daily_dataset(
+                "processed_income_path", parsed_start_date, parsed_end_date
+            )
+        )
+
+        # Create category vs typical comparison charts
+        fig_expense_category_vs_typical = (
+            dashboard_instance.chart_factory.create_category_vs_typical_comparison(
+                filtered_processed_expenses, category_type="expense"
+            )
+        )
+
+        fig_income_category_vs_typical = (
+            dashboard_instance.chart_factory.create_category_vs_typical_comparison(
+                filtered_processed_income, category_type="income"
+            )
+        )
+
+        # Create category statistics breakdown charts (showing all categories)
+        fig_expense_category_stats = (
+            dashboard_instance.chart_factory.create_category_statistics_breakdown(
+                filtered_processed_expenses, category_type="expense"
+            )
+        )
+
+        fig_income_category_stats = (
+            dashboard_instance.chart_factory.create_category_statistics_breakdown(
+                filtered_processed_income, category_type="income"
+            )
+        )
+
         return (
             summary_cards,
             fig_main_overview,
@@ -413,4 +477,11 @@ def setup_callbacks(dashboard_instance) -> None:
             fig_savings_breakdown,
             fig_monthly_savings_rate,
             fig_allocation_vs_risparmio,
+            fig_statistics_summary,
+            fig_prediction_scenarios,
+            fig_current_vs_typical,
+            fig_expense_category_vs_typical,
+            fig_income_category_vs_typical,
+            fig_expense_category_stats,
+            fig_income_category_stats,
         )
