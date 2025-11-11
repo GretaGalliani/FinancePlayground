@@ -59,12 +59,12 @@ class DashboardLayout:
         # Set default end date to current month
         end_date = current_month_start
 
-        # Set default start date to 6 months before current month, or min_date if more recent
-        start_date = datetime(
-            today.year - 1 if today.month < 7 else today.year,
-            today.month + 6 if today.month < 7 else today.month - 6,
-            1,
-        )
+        # Set default start date to 12 months before current month, or min_date if more recent
+        # Calculate 11 months ago (to show 12 months total including current month)
+        if today.month == 12:
+            start_date = datetime(today.year, 1, 1)
+        else:
+            start_date = datetime(today.year - 1, today.month + 1, 1)
 
         # Make sure dates are within range
         if start_date < self.min_date:
