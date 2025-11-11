@@ -896,7 +896,7 @@ class ChartFactory:
         # Create figure with secondary y-axis
         fig = go.Figure()
 
-        # FIRST: Add stacked bars for each savings category (secondary y-axis)
+        # Add stacked bars for each savings category (primary y-axis) first
         for category, values in category_data.items():
             safe_key = category_to_safe_key[category]  # Get the safe key
             cat_color = category_colors_dict[safe_key]  # Use safe key for color lookup
@@ -912,11 +912,11 @@ class ChartFactory:
                     opacity=0.9,
                     customdata=combined_data,
                     hovertemplate=hover_template,
-                    yaxis="y2",
+                    yaxis="y1",  # Use primary y-axis for bars
                 )
             )
 
-        # SECOND: Add savings rate line (primary y-axis) AFTER bars so it renders on top
+        # Add savings rate line (secondary y-axis) last so it renders on top
         fig.add_trace(
             go.Scatter(
                 x=display_months,
@@ -927,7 +927,7 @@ class ChartFactory:
                 marker=dict(size=8, color=rate_color),
                 customdata=combined_data,
                 hovertemplate=hover_template,
-                yaxis="y1",
+                yaxis="y2",  # Use secondary y-axis for line
             )
         )
 
@@ -938,15 +938,15 @@ class ChartFactory:
         fig.update_layout(
             barmode="relative",  # Stack positive above 0, negative below 0
             yaxis=dict(
-                title="Savings Rate (%)",
-                tickformat=".1f",
-                side="left",
-            ),
-            yaxis2=dict(
                 title="Amount Saved by Category (€)",
                 tickformat="€,.0f",
+                side="right",  # Amount axis on the right
+            ),
+            yaxis2=dict(
+                title="Savings Rate (%)",
+                tickformat=".1f",
                 overlaying="y",
-                side="right",
+                side="left",  # Savings rate axis on the left
             ),
             hovermode="closest",  # Use closest to avoid text repetition
             legend=dict(
@@ -957,11 +957,6 @@ class ChartFactory:
                 x=0.5,
             ),
         )
-
-        # Ensure the line trace renders on top by setting higher zorder
-        # Bar traces get default zorder, scatter trace gets higher zorder to appear on top
-        fig.update_traces(selector=dict(type="scatter"), zorder=10)
-        fig.update_traces(selector=dict(type="bar"), zorder=1)
 
         return fig
 
